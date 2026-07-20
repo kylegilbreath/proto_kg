@@ -1,0 +1,208 @@
+/* ============================================================================
+   BrickSport Command — Insights surface, scoped to .bs-root
+   Ported from the databricks-apps kit's brickstore.css. Every rule is scoped
+   under .bs-root so it cannot leak into the rest of the site.
+
+   Theme: the kit keyed dark off .bs-root[data-theme='dark'] with light as the
+   default. This project uses next-themes (a `.dark` class on <html>) with a
+   LIGHT default. bs-app sets data-theme from useTheme().resolvedTheme once
+   mounted, so the attribute stays the source of truth for the imperative canvas
+   map. The extra `.dark .bs-root:not([data-theme='light'])` selector paints the
+   correct colors pre-mount (before the attribute is written) with no flash.
+
+   Fonts (DM Sans, Plus Jakarta Sans) are supplied by next/font via the
+   --font-bs-dm / --font-bs-jakarta CSS variables set on the .bs-root element,
+   with a system fallback — no runtime Google Fonts @import.
+   ============================================================================ */
+
+.bs-root {
+  /* functional series */
+  --ins-indigo: #6E63D6;
+  --ins-indigo-soft: rgba(110, 99, 214, 0.14);
+  --ins-teal: #1FA67D;
+  --ins-teal-soft: rgba(31, 166, 125, 0.14);
+  --ins-red: #E2504E;
+  --ins-amber: #E8A33D;
+  --ins-green: #5FA02A;
+  --ins-red-soft: rgba(226, 80, 78, 0.12);
+  --ins-amber-soft: rgba(232, 163, 61, 0.12);
+  --ins-green-soft: rgba(95, 160, 42, 0.12);
+  --ins-grid: var(--border);
+  --ins-axis: var(--text-muted);
+  --ins-radius: 12px;
+  --ins-radius-sm: 9px;
+  --ins-hairline: rgba(0, 0, 0, 0.08);
+  --ins-tile-sep: rgba(0, 0, 0, 0.14);
+
+  --font-display: var(--font-bs-dm), 'DM Sans', system-ui, sans-serif;
+  --font-title: var(--font-bs-dm), 'DM Sans', system-ui, sans-serif;
+  --font-ui: var(--font-bs-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: var(--font-bs-dm), 'DM Sans', system-ui, sans-serif;
+
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-blur: 12px;
+  --shadow-soft: 0 2px 6px rgba(0, 0, 0, 0.05), 0 12px 32px rgba(0, 0, 0, 0.08);
+  --shadow-menu: 0 16px 32px -10px rgba(0, 0, 0, 0.16);
+  --nav-edge-highlight: rgba(255, 255, 255, 0.45);
+  --menu-edge: rgba(20, 24, 26, 0.22);
+  --accent: #A8843A;
+  --header-height: 56px;
+
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Light surface (default + explicit) */
+.bs-root,
+.bs-root[data-theme='light'] {
+  --bg-deep: #FCFCFB;
+  --bg-elevated: #FFFFFF;
+  --bg-surface: #F1EFEB;
+  --border: rgba(20, 24, 26, 0.09);
+  --text-primary: #14181A;
+  --text-secondary: #4A524E;
+  --text-muted: #828A85;
+  --ins-hairline: rgba(20, 24, 26, 0.09);
+  --ins-tile-sep: rgba(20, 24, 26, 0.15);
+  --ins-indigo: #534AB7;
+  --ins-teal: #1D9E75;
+  --ins-red: #D24643;
+  --ins-amber: #D7912B;
+  --ins-green: #5C9A26;
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --nav-edge-highlight: rgba(255, 255, 255, 0.45);
+  --menu-edge: rgba(20, 24, 26, 0.22);
+}
+
+/* Dark surface — matches the app shell indigo ground.
+   `.bs-root[data-theme='dark']` is the mounted state; the `.dark` selector
+   covers the pre-mount frame before bs-app writes the attribute. */
+.bs-root[data-theme='dark'],
+.dark .bs-root:not([data-theme='light']) {
+  color-scheme: dark;
+  --bg-deep: #181924;
+  --bg-elevated: #1F212E;
+  --bg-surface: #262838;
+  --border: rgba(180, 184, 210, 0.10);
+  --text-primary: #E2E3EC;
+  --text-secondary: #9CA0BC;
+  --text-muted: #585C76;
+  --ins-hairline: rgba(180, 184, 210, 0.10);
+  --ins-tile-sep: rgba(180, 184, 210, 0.20);
+  --ins-indigo: #847BD8;
+  --ins-teal: #3CB897;
+  --ins-red: #E36462;
+  --ins-amber: #E6AC52;
+  --ins-green: #7FB44C;
+  --glass-bg: rgba(20, 21, 31, 0.74);
+  --shadow-soft: 0 2px 6px rgba(0, 0, 0, 0.28), 0 12px 32px rgba(0, 0, 0, 0.24);
+  --shadow-menu: 0 18px 36px -10px rgba(0, 0, 0, 0.52);
+  --nav-edge-highlight: rgba(255, 255, 255, 0.06);
+  --menu-edge: rgba(180, 184, 210, 0.28);
+  --accent: #B79E6E;
+}
+
+.bs-root { background: var(--bg-deep); color: var(--text-primary); }
+.bs-root *, .bs-root *::before, .bs-root *::after { box-sizing: border-box; }
+
+/* standalone / preview host — the .bs-root scroll container fills its parent */
+.bs-root.bs-host { height: 100%; overflow-y: auto; overflow-x: hidden; }
+
+/* type utilities */
+.bs-root .font-display { font-family: var(--font-display); }
+.bs-root .font-title { font-family: var(--font-title); font-variant-numeric: normal; }
+.bs-root .font-ui { font-family: var(--font-ui); }
+.bs-root .font-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.bs-root .tabular { font-variant-numeric: tabular-nums; }
+
+/* scoped scrollbar for inner wells */
+.bs-root .ins-tile-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.bs-root .ins-tile-scroll:hover { scrollbar-color: var(--border) transparent; }
+.bs-root .ins-tile-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.bs-root .ins-tile-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+.bs-root .ins-tile-scroll:hover::-webkit-scrollbar-thumb { background: var(--border); }
+
+/* menu panel — the shared dropdown surface */
+.bs-root .menu-panel,
+.bs-menu-panel {
+  background: var(--bg-deep);
+  border: none;
+  border-radius: 0 0 12px 12px;
+  box-shadow: inset 0 1px 0 var(--nav-edge-highlight), var(--shadow-menu);
+  overflow: hidden;
+}
+
+/* feathered header edge */
+.bs-nav-feather { position: relative; }
+
+/* When the builder's select-to-edit tool is active, let clicks/hover fall through
+   the chart canvas + SVGs to their data-cmp card so individual charts are selectable. */
+.pv-selecting .bs-root canvas,
+.pv-selecting .bs-root svg { pointer-events: none; }
+.bs-nav-feather::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 14px;
+  pointer-events: none; z-index: 30;
+  background: linear-gradient(to bottom, var(--bg-deep), transparent);
+}
+
+/* selection */
+.bs-root ::selection { background: var(--ins-indigo-soft); color: var(--text-primary); }
+
+/* buttons default to no UA border/background; inline styles override where a border is wanted */
+.bs-root button { border: none; background: none; font-family: inherit; }
+
+/* override the builder's .dash chrome when it hosts the brickstore app */
+.pv-preview .dash.bs-host { padding: 0; background: var(--bg-deep); }
+
+/* page container + layout */
+.bs-root .bs-page { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 28px 28px; }
+.bs-root .bs-overview-grid { margin-top: 4px; display: flex; flex-direction: column; gap: 28px; }
+.bs-root .bs-split { display: flex; flex-direction: column; gap: 16px; }
+.bs-root .bs-tilerow { display: grid; grid-template-columns: 1fr; gap: 16px; }
+
+/* wide preview pane → side-by-side */
+@media (min-width: 760px) {
+  .bs-root .bs-overview-grid { flex-direction: row; align-items: center; gap: 28px; }
+  .bs-root .bs-split { flex-direction: row; }
+  .bs-root .bs-tilerow { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* device-preview narrow override (frame is narrower than the viewport, so the
+   viewport media query above still matches — force single-column explicitly) */
+.bs-root.bs-narrow .bs-overview-grid { flex-direction: column; align-items: stretch; gap: 28px; }
+.bs-root.bs-narrow .bs-split { flex-direction: column; }
+.bs-root.bs-narrow .bs-tilerow { grid-template-columns: 1fr; }
+
+/* flex helpers used inline */
+.bs-root .flex { display: flex; }
+.bs-root .inline-flex { display: inline-flex; }
+.bs-root .flex-col { flex-direction: column; }
+.bs-root .items-center { align-items: center; }
+.bs-root .items-start { align-items: flex-start; }
+.bs-root .items-end { align-items: flex-end; }
+.bs-root .items-baseline { align-items: baseline; }
+.bs-root .justify-between { justify-content: space-between; }
+.bs-root .justify-center { justify-content: center; }
+.bs-root .justify-end { justify-content: flex-end; }
+.bs-root .grid { display: grid; }
+.bs-root .relative { position: relative; }
+.bs-root .absolute { position: absolute; }
+.bs-root .sticky { position: sticky; }
+.bs-root .w-full { width: 100%; }
+.bs-root .min-w-0 { min-width: 0; }
+.bs-root .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-root .text-left { text-align: left; }
+
+/* header + menu hovers */
+.bs-root .bs-headbtn:hover { color: var(--text-primary); }
+.bs-opt:hover { background: var(--bg-surface) !important; }
+.bs-iconact:not([disabled]):hover { background: var(--bg-surface); color: var(--text-primary); }
+.bs-raildot .group-label { opacity: 0; }
+
+/* review panel + rail live in portals (into the preview pane or the .bs-root
+   itself), so give them their own keyframes at root level */
+@keyframes bs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bs-slide { from { transform: translateX(28px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.pv-preview .bs-rail { font-family: var(--font-bs-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif; }
