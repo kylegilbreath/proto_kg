@@ -290,7 +290,7 @@ function EmptyState({
   return (
     <div className="mx-auto flex w-full max-w-[560px] flex-1 flex-col items-center justify-center gap-6 px-6 py-10">
       <DbIcon icon={GenieCodeIcon} color="ai" size={48} />
-      <h1 className="text-2xl font-semibold leading-8 text-foreground">What can I help you build?</h1>
+      <h1 className="text-center text-2xl font-semibold leading-8 text-foreground">What can I help you build?</h1>
 
       <Composer input={input} setInput={setInput} tags={tags} setTags={setTags} onSubmit={onPick} className="w-full" />
 
