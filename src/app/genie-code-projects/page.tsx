@@ -17,6 +17,23 @@ import { Input } from "@/components/ui/input"
 import { SegmentedControl, SegmentedItem } from "@/components/ui/segmented-control"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogBody,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -53,10 +70,10 @@ import {
   SearchIcon,
   ArrowLeftIcon,
   OverflowIcon,
-  PinIcon,
   LockIcon,
   ShareIcon,
-  NewWindowIcon,
+  FileDocumentIcon,
+  FolderOpenIcon,
 } from "@/components/icons"
 import { ThumbsUpIcon, ThumbsDownIcon, CopyIcon } from "lucide-react"
 
@@ -479,7 +496,7 @@ const PROJECTS: Project[] = [
 
 const PROJECT_TABS = [
   { value: "yours", label: "Your projects" },
-  { value: "org", label: "Organization" },
+  { value: "org", label: "Workspace" },
   { value: "shared", label: "Shared with you" },
 ] as const
 
@@ -583,8 +600,15 @@ function ProjectsView({ onOpenProject }: { onOpenProject: (id: string) => void }
 // ─── Project detail ──────────────────────────────────────────────────────────────
 
 const PROJECT_DETAIL_TABS = [
-  { value: "chats", label: "Your chats" },
-  { value: "activity", label: "Activity" },
+  { value: "chats", label: "Chats" },
+  { value: "assets", label: "Assets" },
+  { value: "instructions", label: "Instructions" },
+] as const
+
+const PROJECT_CHATS = [
+  { title: "Customer feedback from genie-paygo channel", time: "18 hours ago" },
+  { title: "Adoption trends across enterprise accounts", time: "yesterday" },
+  { title: "Draft the Q3 exec readout narrative", time: "3 days ago" },
 ] as const
 
 function ProjectSection({
@@ -616,6 +640,10 @@ function ProjectDetail({ project, onBack }: { project: Project; onBack: () => vo
   const [input, setInput] = React.useState("")
   const [tags, setTags] = React.useState<GenieTag[]>([])
   const [tab, setTab] = React.useState<string>("chats")
+  const [searchOpen, setSearchOpen] = React.useState(false)
+  const [search, setSearch] = React.useState("")
+  const [sort, setSort] = React.useState("recent")
+  const [addAssetOpen, setAddAssetOpen] = React.useState(false)
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto px-8 py-6">
@@ -645,9 +673,6 @@ function ProjectDetail({ project, onBack }: { project: Project; onBack: () => vo
             <Button variant="ghost" size="icon-xs" aria-label="More options">
               <OverflowIcon size={16} className="text-muted-foreground" />
             </Button>
-            <Button variant="ghost" size="icon-xs" aria-label="Pin project">
-              <PinIcon size={16} className="text-muted-foreground" />
-            </Button>
             <Button variant="default" size="sm" className="gap-1">
               <ShareIcon size={16} />
               Share
@@ -667,54 +692,227 @@ function ProjectDetail({ project, onBack }: { project: Project; onBack: () => vo
           modelName="Sonnet 5"
         />
 
-        {/* Start a task */}
-        <button
-          type="button"
-          className="mx-auto flex items-center gap-1.5 text-sm font-semibold text-foreground transition-colors hover:text-primary"
-        >
-          <NewWindowIcon size={16} />
-          Start a task
-        </button>
-
-        {/* Chats / Activity tabs */}
-        <div className="flex items-center justify-between gap-4">
+        {/* Tabs + search + sort */}
+        <div className="flex items-center gap-2">
           <SegmentedControl value={tab} onValueChange={setTab}>
             {PROJECT_DETAIL_TABS.map((t) => (
               <SegmentedItem key={t.value} value={t.value}>{t.label}</SegmentedItem>
             ))}
           </SegmentedControl>
-          <span className="flex items-center gap-1.5 text-hint text-muted-foreground">
-            <LockIcon size={12} />
-            Your chats are private until shared
-          </span>
+          <div className="flex-1" />
+          {/* Search + sort — only on the Chats tab */}
+          {tab === "chats" && (
+            <>
+              {searchOpen ? (
+                <div className="relative">
+                  <SearchIcon
+                    size={16}
+                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <Input
+                    autoFocus
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    onBlur={() => { if (!search) setSearchOpen(false) }}
+                    placeholder="Search chats"
+                    className="h-8 w-48 pl-8"
+                  />
+                </div>
+              ) : (
+                <Button variant="ghost" size="icon-sm" aria-label="Search chats" onClick={() => setSearchOpen(true)}>
+                  <SearchIcon size={16} className="text-muted-foreground" />
+                </Button>
+              )}
+              <Select value={sort} onValueChange={setSort}>
+                <SelectTrigger className="h-8 w-[150px]" aria-label="Sort chats">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="recent">Recent first</SelectItem>
+                  <SelectItem value="oldest">Oldest first</SelectItem>
+                  <SelectItem value="name">Name</SelectItem>
+                </SelectContent>
+              </Select>
+            </>
+          )}
         </div>
 
-        {/* Chat row */}
+        {/* Tab content */}
+        {tab === "chats" && (
+          <div className="flex flex-col gap-0.5">
+            {PROJECT_CHATS.map((chat) => (
+              <button
+                key={chat.title}
+                type="button"
+                className="flex items-center gap-3 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
+              >
+                <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
+                <span className="flex-1 truncate text-sm text-foreground">{chat.title}</span>
+                <span className="shrink-0 text-hint text-muted-foreground">{chat.time}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {tab === "assets" && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-start justify-between gap-4">
+              <p className="max-w-[560px] text-sm text-muted-foreground">
+                Assets keep their workspace folder structure — attach a folder or an individual notebook, and
+                it appears here right where it lives in your workspace.
+              </p>
+              <Button variant="default" size="sm" className="shrink-0 gap-1" onClick={() => setAddAssetOpen(true)}>
+                <PlusIcon size={16} />
+                Add asset
+              </Button>
+            </div>
+            <div className="rounded-md border border-border">
+              <div className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Assets in scope <span className="mx-1 font-normal">·</span> 3 notebooks
+                <span className="mx-1 font-normal">·</span> 1 dashboards
+                <span className="mx-1 font-normal">·</span> 1 files
+              </div>
+              <AssetTree />
+            </div>
+          </div>
+        )}
+
+        {/* Instructions — shown on the Instructions tab */}
+        {tab === "instructions" && (
+          <div className="rounded-md border border-border">
+            <ProjectSection title="Instructions" hint="Add instructions to tailor Genie's responses" />
+          </div>
+        )}
+      </div>
+
+      <AddAssetDialog open={addAssetOpen} onOpenChange={setAddAssetOpen} />
+    </div>
+  )
+}
+
+// ─── Assets tree + Add asset dialog ────────────────────────────────────────────
+
+type AssetItem = {
+  name: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  icon: React.ComponentType<any>
+  color: string
+}
+
+const ASSET_ITEMS: AssetItem[] = [
+  { name: "adoption_overview", icon: NotebookIcon, color: "text-primary" },
+  { name: "cohort_segmentation", icon: NotebookIcon, color: "text-primary" },
+  { name: "retention_signals", icon: NotebookIcon, color: "text-primary" },
+  { name: "Adoption Dashboard", icon: DashboardIcon, color: "text-[var(--success)]" },
+  { name: "exec_readout.md", icon: FileDocumentIcon, color: "text-muted-foreground" },
+]
+
+function AssetTree() {
+  const [open, setOpen] = React.useState(true)
+  return (
+    <div className="py-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted"
+      >
+        <ChevronRightIcon
+          size={14}
+          className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+        />
+        <FolderOpenIcon size={16} className="shrink-0 text-[var(--warning)]" />
+        <span className="flex-1 truncate text-sm text-foreground">Users/tanvi/lakeflow</span>
+        <span className="shrink-0 text-hint text-muted-foreground">5</span>
+      </button>
+      {open &&
+        ASSET_ITEMS.map((item) => (
+          <div key={item.name} className="flex items-center gap-2 py-1.5 pl-11 pr-3">
+            <DbIcon icon={item.icon} size={16} className={cn("shrink-0", item.color)} />
+            <span className="truncate text-sm text-foreground">{item.name}</span>
+          </div>
+        ))}
+    </div>
+  )
+}
+
+type WsNode = { id: string; name: string; count: number; children?: WsNode[] }
+
+const WORKSPACE_TREE: WsNode[] = [
+  {
+    id: "users",
+    name: "Users",
+    count: 17,
+    children: [{ id: "tanvi", name: "tanvi", count: 17 }],
+  },
+]
+
+function WorkspaceRow({ node, depth }: { node: WsNode; depth: number }) {
+  const [open, setOpen] = React.useState(depth === 0)
+  const hasChildren = !!node.children?.length
+  return (
+    <>
+      <div className="flex items-center gap-2 py-1.5" style={{ paddingLeft: depth * 24 }}>
         <button
           type="button"
-          className="flex items-center gap-3 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
+          onClick={() => hasChildren && setOpen((v) => !v)}
+          aria-label={open ? "Collapse" : "Expand"}
+          className={cn("shrink-0 text-muted-foreground", !hasChildren && "invisible")}
         >
-          <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate text-sm text-foreground">
-            Customer feedback from genie-paygo channel
-          </span>
-          <span className="shrink-0 text-hint text-muted-foreground">18 hours ago</span>
+          <ChevronRightIcon size={14} className={cn("transition-transform", open && "rotate-90")} />
         </button>
-
-        {/* Instructions + Files */}
-        <div className="rounded-md border border-border">
-          <ProjectSection title="Instructions" hint="Add instructions to tailor Genie's responses" />
-          <ProjectSection title="Files">
-            <div className="flex flex-col items-center gap-2 rounded-md bg-secondary px-4 py-8 text-center">
-              <FolderIcon size={32} className="text-muted-foreground/40" />
-              <p className="text-hint text-muted-foreground">
-                Add PDFs, documents, or other text to reference in this project.
-              </p>
-            </div>
-          </ProjectSection>
-        </div>
+        <Checkbox />
+        <FolderOpenIcon size={16} className="shrink-0 text-[var(--warning)]" />
+        <span className="flex-1 truncate text-sm text-foreground">{node.name}</span>
+        <span className="shrink-0 text-hint text-muted-foreground">{node.count}</span>
       </div>
-    </div>
+      {open && node.children?.map((child) => <WorkspaceRow key={child.id} node={child} depth={depth + 1} />)}
+    </>
+  )
+}
+
+function AddAssetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const [search, setSearch] = React.useState("")
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>Add assets to project</DialogTitle>
+          <DialogDescription>
+            Browse your workspace and check folders or individual items — folder checks pull in everything inside.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-3">
+          <div className="relative">
+            <SearchIcon
+              size={16}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search notebooks, dashboards, files..."
+              className="h-8 pl-8"
+            />
+          </div>
+          <div className="rounded-md border border-border">
+            <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Workspace <span className="font-normal">›</span> Users{" "}
+              <span className="font-normal">›</span> tanvi.shanbhag@databricks.com
+            </div>
+            <div className="px-3 py-1">
+              {WORKSPACE_TREE.map((node) => (
+                <WorkspaceRow key={node.id} node={node} depth={0} />
+              ))}
+            </div>
+          </div>
+        </DialogBody>
+        <DialogFooter className="items-center">
+          <span className="mr-auto text-hint text-muted-foreground">Nothing selected</span>
+          <Button variant="default" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button size="sm" disabled>Add</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
