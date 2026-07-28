@@ -15,6 +15,7 @@ import {
   QueryIcon,
   BarChartIcon,
   AssistantIcon,
+  GenieCodeIcon,
   NotificationIcon,
   HistoryIcon,
   DatabaseIcon,
@@ -51,7 +52,7 @@ type NavSection = {
 const NAV_SECTIONS: NavSection[] = [
   {
     items: [
-      { id: "genie-code",  label: "Genie Code",  icon: AssistantIcon,  iconColor: "ai", href: "/genie-code-projects" },
+      { id: "genie-code",  label: "Genie Code",  icon: GenieCodeIcon,  iconColor: "ai", href: "/genie-code-projects" },
       { id: "workspace",   label: "Workspace",   icon: NotebookIcon,   href: "/workspace" },
       { id: "recents",     label: "Recents",     icon: ClockIcon },
       { id: "catalog",     label: "Catalog",     icon: CatalogIcon,    href: "/catalog" },
