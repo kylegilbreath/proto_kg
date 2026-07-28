@@ -209,7 +209,7 @@ function NavItemButton({
   const content = (
     <>
       <span className={cn(
-        "shrink-0 transition-colors",
+        "flex h-4 w-4 shrink-0 items-center justify-center transition-colors",
         // Active: primary (blue). Inactive: muted by default, foreground on hover.
         active
           ? "text-primary"

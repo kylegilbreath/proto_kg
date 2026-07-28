@@ -44,9 +44,9 @@ type ThreadGroup = {
 const ACTIONS: { id: string; label: string; icon: React.ComponentType<any>; badge?: number }[] = [
   { id: "new-chat", label: "New chat", icon: NewChatIcon },
   { id: "schedules", label: "Schedules", icon: CalendarClockIcon },
-  { id: "customizations", label: "Customizations", icon: SlidersIcon },
+  { id: "customizations", label: "Settings", icon: SlidersIcon },
   { id: "projects", label: "Projects", icon: FolderIcon },
-  { id: "inbox", label: "Inbox", icon: SyncIcon, badge: 5 },
+  { id: "inbox", label: "ZeroOps Inbox", icon: SyncIcon, badge: 5 },
 ]
 
 // ─── Mock data ────────────────────────────────────────────────────────────────

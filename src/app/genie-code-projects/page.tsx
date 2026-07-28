@@ -51,6 +51,12 @@ import {
   SpeechBubbleIcon,
   NewChatIcon,
   SearchIcon,
+  ArrowLeftIcon,
+  OverflowIcon,
+  PinIcon,
+  LockIcon,
+  ShareIcon,
+  NewWindowIcon,
 } from "@/components/icons"
 import { ThumbsUpIcon, ThumbsDownIcon, CopyIcon } from "lucide-react"
 
@@ -150,7 +156,8 @@ export default function GenieCodeProjects() {
   const [activeThreadId, setActiveThreadId] = React.useState<string>()
   const [awaitingApproval, setAwaitingApproval] = React.useState(false)
   const [canvasOpen, setCanvasOpen] = React.useState(false)
-  const [view, setView] = React.useState<"chat" | "projects">("chat")
+  const [view, setView] = React.useState<"chat" | "projects" | "detail">("chat")
+  const [selectedProjectId, setSelectedProjectId] = React.useState<string>()
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -215,12 +222,19 @@ export default function GenieCodeProjects() {
           onSelectThread={(id) => { setView("chat"); setActiveThreadId(id) }}
           onNewChat={() => { setView("chat"); handleNewChat() }}
           onSelectAction={(id) => setView(id === "projects" ? "projects" : "chat")}
-          activeAction={view === "projects" ? "projects" : undefined}
+          activeAction={view === "projects" || view === "detail" ? "projects" : undefined}
           activeStatus={awaitingApproval ? "Waiting for your approval" : undefined}
         />
 
         {view === "projects" ? (
-          <ProjectsView />
+          <ProjectsView
+            onOpenProject={(id) => { setSelectedProjectId(id); setView("detail") }}
+          />
+        ) : view === "detail" ? (
+          <ProjectDetail
+            project={PROJECTS.find((p) => p.id === selectedProjectId) ?? PROJECTS[0]}
+            onBack={() => setView("projects")}
+          />
         ) : (
         /* Chat column */
         <div className="flex flex-1 flex-col overflow-hidden">
@@ -469,11 +483,13 @@ const PROJECT_TABS = [
   { value: "shared", label: "Shared with you" },
 ] as const
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
   return (
     <div
       role="button"
       tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen() } }}
       className="flex cursor-pointer flex-col gap-3 rounded-md border border-border bg-background p-4 text-left transition-colors hover:bg-muted"
     >
       <div className="flex items-start gap-2">
@@ -505,7 +521,7 @@ function ProjectCard({ project }: { project: Project }) {
   )
 }
 
-function ProjectsView() {
+function ProjectsView({ onOpenProject }: { onOpenProject: (id: string) => void }) {
   const [tab, setTab] = React.useState<string>("yours")
   const [search, setSearch] = React.useState("")
 
@@ -555,10 +571,148 @@ function ProjectsView() {
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {projects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
+              <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project.id)} />
             ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Project detail ──────────────────────────────────────────────────────────────
+
+const PROJECT_DETAIL_TABS = [
+  { value: "chats", label: "Your chats" },
+  { value: "activity", label: "Activity" },
+] as const
+
+function ProjectSection({
+  title,
+  hint,
+  children,
+}: {
+  title: string
+  hint?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="border-b border-border last:border-b-0">
+      <div className="flex items-center gap-2 px-4 py-3">
+        <div className="flex flex-1 flex-col">
+          <span className="text-sm font-semibold text-foreground">{title}</span>
+          {hint && <span className="text-hint text-muted-foreground">{hint}</span>}
+        </div>
+        <Button variant="ghost" size="icon-xs" aria-label={`Add to ${title}`}>
+          <PlusIcon size={16} className="text-muted-foreground" />
+        </Button>
+      </div>
+      {children && <div className="px-4 pb-4">{children}</div>}
+    </div>
+  )
+}
+
+function ProjectDetail({ project, onBack }: { project: Project; onBack: () => void }) {
+  const [input, setInput] = React.useState("")
+  const [tags, setTags] = React.useState<GenieTag[]>([])
+  const [tab, setTab] = React.useState<string>("chats")
+
+  return (
+    <div className="flex flex-1 flex-col overflow-y-auto px-8 py-6">
+      <div className="mx-auto flex w-full max-w-[820px] flex-col gap-5">
+        {/* Back */}
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeftIcon size={16} />
+          All projects
+        </button>
+
+        {/* Title row */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-[22px] font-semibold leading-7 text-foreground">{project.name}</h2>
+            <div className="flex items-center gap-1.5 text-hint text-muted-foreground">
+              Created by you
+              <span aria-hidden>·</span>
+              <LockIcon size={12} />
+              Private
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button variant="ghost" size="icon-xs" aria-label="More options">
+              <OverflowIcon size={16} className="text-muted-foreground" />
+            </Button>
+            <Button variant="ghost" size="icon-xs" aria-label="Pin project">
+              <PinIcon size={16} className="text-muted-foreground" />
+            </Button>
+            <Button variant="default" size="sm" className="gap-1">
+              <ShareIcon size={16} />
+              Share
+            </Button>
+          </div>
+        </div>
+
+        {/* Composer */}
+        <GeniePrompt
+          variant="chat"
+          value={input}
+          onChange={setInput}
+          onSubmit={() => setInput("")}
+          tags={tags}
+          onTagRemove={(id) => setTags((prev) => prev.filter((t) => t.id !== id))}
+          placeholder="How can I help you today?"
+          modelName="Sonnet 5"
+        />
+
+        {/* Start a task */}
+        <button
+          type="button"
+          className="mx-auto flex items-center gap-1.5 text-sm font-semibold text-foreground transition-colors hover:text-primary"
+        >
+          <NewWindowIcon size={16} />
+          Start a task
+        </button>
+
+        {/* Chats / Activity tabs */}
+        <div className="flex items-center justify-between gap-4">
+          <SegmentedControl value={tab} onValueChange={setTab}>
+            {PROJECT_DETAIL_TABS.map((t) => (
+              <SegmentedItem key={t.value} value={t.value}>{t.label}</SegmentedItem>
+            ))}
+          </SegmentedControl>
+          <span className="flex items-center gap-1.5 text-hint text-muted-foreground">
+            <LockIcon size={12} />
+            Your chats are private until shared
+          </span>
+        </div>
+
+        {/* Chat row */}
+        <button
+          type="button"
+          className="flex items-center gap-3 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
+        >
+          <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
+          <span className="flex-1 truncate text-sm text-foreground">
+            Customer feedback from genie-paygo channel
+          </span>
+          <span className="shrink-0 text-hint text-muted-foreground">18 hours ago</span>
+        </button>
+
+        {/* Instructions + Files */}
+        <div className="rounded-md border border-border">
+          <ProjectSection title="Instructions" hint="Add instructions to tailor Genie's responses" />
+          <ProjectSection title="Files">
+            <div className="flex flex-col items-center gap-2 rounded-md bg-secondary px-4 py-8 text-center">
+              <FolderIcon size={32} className="text-muted-foreground/40" />
+              <p className="text-hint text-muted-foreground">
+                Add PDFs, documents, or other text to reference in this project.
+              </p>
+            </div>
+          </ProjectSection>
+        </div>
       </div>
     </div>
   )
