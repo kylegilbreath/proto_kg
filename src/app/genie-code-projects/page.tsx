@@ -29,6 +29,7 @@ import {
 import {
   GenieCodeIcon,
   SidebarCollapseIcon,
+  SidebarExpandIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   FolderIcon,
@@ -142,6 +143,7 @@ export default function GenieCodeProjects() {
   const [isThinking, setIsThinking] = React.useState(false)
   const [activeThreadId, setActiveThreadId] = React.useState<string>()
   const [awaitingApproval, setAwaitingApproval] = React.useState(false)
+  const [canvasOpen, setCanvasOpen] = React.useState(false)
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -261,8 +263,8 @@ export default function GenieCodeProjects() {
           )}
         </div>
 
-        {/* Workspace canvas */}
-        <WorkspaceCanvas />
+        {/* Workspace canvas — collapsed by default */}
+        <WorkspaceCanvas open={canvasOpen} onToggle={() => setCanvasOpen((v) => !v)} />
       </div>
     </AppShell>
   )
@@ -420,11 +422,22 @@ function AgenticResponse({
 
 // ─── Workspace canvas ────────────────────────────────────────────────────────────
 
-function WorkspaceCanvas() {
+function WorkspaceCanvas({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  // Collapsed: slim rail with an expand button so the panel can be reopened.
+  if (!open) {
+    return (
+      <aside className="flex w-11 shrink-0 flex-col items-center border-l border-border py-2">
+        <Button variant="ghost" size="icon-xs" aria-label="Open canvas" onClick={onToggle}>
+          <SidebarExpandIcon size={16} className="text-muted-foreground" />
+        </Button>
+      </aside>
+    )
+  }
+
   return (
     <aside className="flex w-[320px] shrink-0 flex-col border-l border-border">
       <div className="flex h-11 shrink-0 items-center justify-end px-2">
-        <Button variant="ghost" size="icon-xs" aria-label="Collapse canvas">
+        <Button variant="ghost" size="icon-xs" aria-label="Collapse canvas" onClick={onToggle}>
           <SidebarCollapseIcon size={16} className="text-muted-foreground" />
         </Button>
       </div>
