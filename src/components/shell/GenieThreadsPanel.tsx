@@ -88,6 +88,22 @@ const GROUPS: ThreadGroup[] = [
   },
 ]
 
+// ─── Exported lookups (so the page can render a selected thread) ────────────────
+
+export type GenieThread = Thread
+
+/** Flat id → thread lookup across all groups. */
+export const GENIE_THREADS: Record<string, GenieThread> = Object.fromEntries(
+  GROUPS.flatMap((g) => g.threads).map((t) => [t.id, t]),
+)
+
+/** Parse a thread's "meta" (e.g. "+8 · 2 assets") into an asset count, or 0. */
+export function threadAssetCount(thread: GenieThread | undefined): number {
+  if (!thread?.meta) return 0
+  const m = thread.meta.match(/(\d+)\s+assets?/)
+  return m ? Number(m[1]) : 0
+}
+
 // ─── Thread row ───────────────────────────────────────────────────────────────
 
 function ThreadRow({

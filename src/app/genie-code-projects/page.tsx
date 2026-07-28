@@ -10,7 +10,7 @@
 
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { AppShell, GenieThreadsPanel } from "@/components/shell"
+import { AppShell, GenieThreadsPanel, GENIE_THREADS, threadAssetCount } from "@/components/shell"
 import { Button } from "@/components/ui/button"
 import { DbIcon } from "@/components/ui/db-icon"
 import { Input } from "@/components/ui/input"
@@ -252,8 +252,18 @@ export default function GenieCodeProjects() {
             project={PROJECTS.find((p) => p.id === selectedProjectId) ?? PROJECTS[0]}
             onBack={() => setView("projects")}
           />
+        ) : activeThreadId && messages.length === 0 && !isThinking ? (
+          /* Selected an existing thread — show its transcript */
+          <ThreadView
+            threadId={activeThreadId}
+            input={input}
+            setInput={setInput}
+            tags={tags}
+            setTags={setTags}
+            onSubmit={send}
+          />
         ) : (
-        /* Chat column */
+        /* Chat column — new chat / live conversation */
         <div className="flex flex-1 flex-col overflow-hidden">
           <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
             {isEmpty ? (
@@ -316,6 +326,112 @@ export default function GenieCodeProjects() {
   )
 }
 
+// ─── Thread view (existing thread transcript) ─────────────────────────────────────
+
+type ThreadTurn = { role: "user" | "assistant"; content: string }
+
+// A few hand-written example transcripts, keyed by thread id.
+const THREAD_TRANSCRIPTS: Record<string, ThreadTurn[]> = {
+  c1: [
+    { role: "user", content: "How can I get support for NFL data analysis in Databricks?" },
+    { role: "assistant", content: "A few good paths: use a Genie space over your NFL tables for natural-language Q&A, spin up a notebook for deeper EDA, or open a support ticket for platform issues. Want me to set up a starter notebook against your play-by-play tables?" },
+  ],
+  c2: [
+    { role: "user", content: "can you executeCode with a sample python cell that runs a SQL query and prints the result?" },
+    { role: "assistant", content: "Sure — here's a cell that runs the query with spark.sql and prints the first rows:\n\nspark.sql(\"SELECT team, SUM(points) AS pts FROM scores GROUP BY team ORDER BY pts DESC\").show(10)" },
+  ],
+  c3: [
+    { role: "user", content: "can you executeCode with a sample python cell for a SQL-like query over my reviews table?" },
+    { role: "assistant", content: "Done. I wrote a small helper and saved it as an asset you can reuse — it wraps the query and returns a tidy DataFrame." },
+  ],
+  c4: [
+    { role: "user", content: "Create a fib function file and a notebook that imports and runs it." },
+    { role: "assistant", content: "Created fib.py and a notebook that imports it and prints the first 10 Fibonacci numbers. Both are attached below." },
+  ],
+}
+
+const GENERIC_TRANSCRIPT: ThreadTurn[] = [
+  { role: "user", content: "Can you help me pick up where this thread left off?" },
+  { role: "assistant", content: "Absolutely — here's a quick recap of what we covered, and I'm ready to continue whenever you are." },
+]
+
+function ThreadView({
+  threadId,
+  input,
+  setInput,
+  tags,
+  setTags,
+  onSubmit,
+}: {
+  threadId: string
+  input: string
+  setInput: (v: string) => void
+  tags: GenieTag[]
+  setTags: React.Dispatch<React.SetStateAction<GenieTag[]>>
+  onSubmit: (v: string) => void
+}) {
+  const thread = GENIE_THREADS[threadId]
+  const turns = THREAD_TRANSCRIPTS[threadId] ?? GENERIC_TRANSCRIPT
+  const assetCount = threadAssetCount(thread)
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Thread title */}
+      <div className="flex h-12 shrink-0 items-center border-b border-border px-6">
+        <span className="truncate text-sm font-semibold text-foreground">
+          {thread?.title ?? "Untitled chat"}
+        </span>
+      </div>
+
+      {/* Transcript */}
+      <div className="flex flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5 px-6 py-6">
+          {turns.map((turn, i) =>
+            turn.role === "user" ? (
+              <Message key={i} from="user">
+                <MessageContent>{turn.content}</MessageContent>
+              </Message>
+            ) : (
+              <Message key={i} from="assistant">
+                <MessageContent className="whitespace-pre-wrap pl-3">{turn.content}</MessageContent>
+                <MessageToolbar className="pl-3">
+                  <MessageActions>
+                    <MessageAction tooltip="Copy"><CopyIcon className="h-4 w-4" /></MessageAction>
+                    <MessageAction tooltip="Helpful"><ThumbsUpIcon className="h-4 w-4" /></MessageAction>
+                    <MessageAction tooltip="Not helpful"><ThumbsDownIcon className="h-4 w-4" /></MessageAction>
+                  </MessageActions>
+                </MessageToolbar>
+              </Message>
+            ),
+          )}
+        </div>
+      </div>
+
+      {/* Composer + assets container */}
+      <div className="shrink-0 border-t border-border">
+        <div className="mx-auto w-full max-w-[720px] px-6 py-4">
+          {assetCount > 0 && (
+            <button
+              type="button"
+              className="mb-3 flex w-full items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2 text-left transition-colors hover:bg-muted"
+            >
+              <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+              <span className="flex-1 text-sm text-foreground">
+                {assetCount} {assetCount === 1 ? "asset" : "assets"} in this chat
+              </span>
+              <ChevronRightIcon size={14} className="shrink-0 text-muted-foreground" />
+            </button>
+          )}
+          <Composer input={input} setInput={setInput} tags={tags} setTags={setTags} onSubmit={onSubmit} />
+          <p className="mt-2 text-center text-hint text-muted-foreground">
+            Always review the accuracy of responses.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Empty state ─────────────────────────────────────────────────────────────────
 
 function EmptyState({
@@ -338,7 +454,7 @@ function EmptyState({
       <DbIcon icon={GenieCodeIcon} color="ai" size={48} />
       <h1 className="text-center text-2xl font-semibold leading-8 text-foreground">What can I help you build?</h1>
 
-      <Composer input={input} setInput={setInput} tags={tags} setTags={setTags} onSubmit={onPick} className="w-full" />
+      <Composer input={input} setInput={setInput} tags={tags} setTags={setTags} onSubmit={onPick} className="w-full" showProject />
 
       {/* Expandable category suggestions — pills wrap into as many rows as needed */}
       <div className="flex w-full flex-col items-center gap-3">
@@ -611,31 +727,6 @@ const PROJECT_CHATS = [
   { title: "Draft the Q3 exec readout narrative", time: "3 days ago" },
 ] as const
 
-function ProjectSection({
-  title,
-  hint,
-  children,
-}: {
-  title: string
-  hint?: string
-  children?: React.ReactNode
-}) {
-  return (
-    <div className="border-b border-border last:border-b-0">
-      <div className="flex items-center gap-2 px-4 py-3">
-        <div className="flex flex-1 flex-col">
-          <span className="text-sm font-semibold text-foreground">{title}</span>
-          {hint && <span className="text-hint text-muted-foreground">{hint}</span>}
-        </div>
-        <Button variant="ghost" size="icon-xs" aria-label={`Add to ${title}`}>
-          <PlusIcon size={16} className="text-muted-foreground" />
-        </Button>
-      </div>
-      {children && <div className="px-4 pb-4">{children}</div>}
-    </div>
-  )
-}
-
 function ProjectDetail({ project, onBack }: { project: Project; onBack: () => void }) {
   const [input, setInput] = React.useState("")
   const [tags, setTags] = React.useState<GenieTag[]>([])
@@ -779,8 +870,13 @@ function ProjectDetail({ project, onBack }: { project: Project; onBack: () => vo
 
         {/* Instructions — shown on the Instructions tab */}
         {tab === "instructions" && (
-          <div className="rounded-md border border-border">
-            <ProjectSection title="Instructions" hint="Add instructions to tailor Genie's responses" />
+          <div className="flex flex-col gap-4">
+            <p className="max-w-[560px] text-sm text-muted-foreground">
+              Instructions and agent memories tailor how Genie responds in this project — preferred tables,
+              response tone, what you&apos;re working on.{" "}
+              <a href="#" className="text-primary hover:underline">Learn more</a>
+            </p>
+            <InstructionsDoc />
           </div>
         )}
       </div>
@@ -916,6 +1012,77 @@ function AddAssetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   )
 }
 
+// ─── Instructions document ─────────────────────────────────────────────────────
+
+const INSTRUCTION_RULES = [
+  "When creating datasets from main.jason_messer.craigslist_vehicles, exclude the url column from the SELECT statement to keep the dataset clean and focused on relevant vehicle data.",
+]
+
+const AGENT_MEMORIES = [
+  "NFL combine project: training table is kyle_gilbreath.nfl_combine_data.2025_nfl_combine (RAS, Ranking, Production as targets); scoring table is kyle_gilbreath.nfl_combine_data.2026_nfl_combine. Predicted rankings saved to kyle_gilbreath.nfl_combine_data.2026_predicted_rankings.",
+  "MLflow experiment for this project lives at /Users/kyle.gilbreath@databricks.com/NFL Combine RAS Predictor.",
+  "ML notebook: NFL Combine ML — Predict Top 2027 Prospects. RandomForestRegressor trained on RAS target, MAE ~0.875, R² ~0.559. Top 2026 prospect: Kenyon Sadiq (Oregon, 9.87 predicted RAS).",
+  "NFL fantasy football: strength-of-schedule table saved at kyle_gilbreath.nfl_fantasy_football.strength_of_schedule, one row per team and position, where schedule_percentile is 0–1 (higher means an easier schedule).",
+]
+
+const INSTRUCTIONS_MARKDOWN =
+  `# Something\n\n- ${INSTRUCTION_RULES.join("\n- ")}\n\n# Agent Memories\n\n- ${AGENT_MEMORIES.join("\n- ")}`
+
+function InstructionsDoc() {
+  const [editing, setEditing] = React.useState(false)
+  const [draft, setDraft] = React.useState(INSTRUCTIONS_MARKDOWN)
+
+  return (
+    <div className="rounded-md border border-border">
+      {/* Header: filename + edit/save/cancel */}
+      <div className="flex items-center gap-2 border-b border-border bg-secondary px-4 py-2">
+        <span className="flex-1 font-mono text-sm text-foreground">.assistant_instructions.md</span>
+        {editing ? (
+          <>
+            <Button variant="default" size="sm" onClick={() => { setDraft(INSTRUCTIONS_MARKDOWN); setEditing(false) }}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => setEditing(false)}>
+              Save
+            </Button>
+          </>
+        ) : (
+          <Button variant="default" size="sm" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+        )}
+      </div>
+
+      {/* Body */}
+      <div className="px-5 py-4">
+        {editing ? (
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="min-h-[280px] w-full resize-none bg-transparent font-mono text-sm text-foreground outline-none"
+          />
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <h3 className="text-lg font-semibold text-foreground">Something</h3>
+              <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-foreground">
+                {INSTRUCTION_RULES.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+            <div className="flex flex-col gap-2">
+              <h3 className="text-lg font-semibold text-foreground">Agent Memories</h3>
+              <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-foreground">
+                {AGENT_MEMORIES.map((m, i) => <li key={i}>{m}</li>)}
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function WorkspaceCanvas({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   // Collapsed: slim rail with an expand button so the panel can be reopened.
   if (!open) {
@@ -965,6 +1132,7 @@ function Composer({
   setTags,
   onSubmit,
   className,
+  showProject = false,
 }: {
   input: string
   setInput: (v: string) => void
@@ -972,6 +1140,8 @@ function Composer({
   setTags: React.Dispatch<React.SetStateAction<GenieTag[]>>
   onSubmit: (v: string) => void
   className?: string
+  /** Show the "Choose project" selector — only before a chat has started */
+  showProject?: boolean
 }) {
   return (
     <GeniePrompt
@@ -984,7 +1154,7 @@ function Composer({
       placeholder="@ for objects, / for commands, ↑↓ for history"
       modelName="Auto"
       showAtButton
-      projectLabel
+      projectLabel={showProject}
       className={className}
     />
   )
