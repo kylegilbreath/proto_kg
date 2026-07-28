@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { DbIcon } from "@/components/ui/db-icon"
 import { Input } from "@/components/ui/input"
 import { SegmentedControl, SegmentedItem } from "@/components/ui/segmented-control"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import {
   Collapsible,
   CollapsibleContent,
@@ -47,11 +48,8 @@ import {
   SlidersIcon,
   CalendarClockIcon,
   ChartLineIcon,
-  AppIcon,
-  FileDocumentIcon,
   SpeechBubbleIcon,
-  PencilIcon,
-  LockIcon,
+  NewChatIcon,
   SearchIcon,
 } from "@/components/icons"
 import { ThumbsUpIcon, ThumbsDownIcon, CopyIcon } from "lucide-react"
@@ -454,20 +452,15 @@ type Project = {
   name: string
   desc: string
   time: string
-  notebooks: number
-  apps: number
-  docs: number
-  threads: number
+  chats: number
   scope: "yours" | "org" | "shared"
-  /** private lock indicator */
-  privateProject?: boolean
 }
 
 const PROJECTS: Project[] = [
-  { id: "p1", name: "Lakeflow Designer Adoption", desc: "Track how teams adopt Lakeflow Designer across the org. Feeds the Q3 exec review.", time: "2h ago", notebooks: 3, apps: 1, docs: 1, threads: 3, scope: "yours", privateProject: true },
-  { id: "p2", name: "Customer Support Agent Reboot", desc: "Reboot the review-and-product-docs agent so it actually calls the right tool.", time: "yesterday", notebooks: 2, apps: 0, docs: 2, threads: 5, scope: "yours" },
-  { id: "p3", name: "Bronze → Silver Reviews Pipeline", desc: "Source → bronze → silver → gold. One project spanning every notebook in the flow.", time: "3d ago", notebooks: 4, apps: 1, docs: 0, threads: 4, scope: "org" },
-  { id: "p4", name: "Q3 Reviews Analytics", desc: "Quarterly deep-dive on review sentiment and product mentions.", time: "5d ago", notebooks: 1, apps: 2, docs: 3, threads: 3, scope: "shared" },
+  { id: "p1", name: "Lakeflow Designer Adoption", desc: "Track how teams adopt Lakeflow Designer across the org. Feeds the Q3 exec review.", time: "2h ago", chats: 3, scope: "yours" },
+  { id: "p2", name: "Customer Support Agent Reboot", desc: "Reboot the review-and-product-docs agent so it actually calls the right tool.", time: "yesterday", chats: 5, scope: "yours" },
+  { id: "p3", name: "Bronze → Silver Reviews Pipeline", desc: "Source → bronze → silver → gold. One project spanning every notebook in the flow.", time: "3d ago", chats: 4, scope: "org" },
+  { id: "p4", name: "Q3 Reviews Analytics", desc: "Quarterly deep-dive on review sentiment and product mentions.", time: "5d ago", chats: 3, scope: "shared" },
 ]
 
 const PROJECT_TABS = [
@@ -476,52 +469,39 @@ const PROJECT_TABS = [
   { value: "shared", label: "Shared with you" },
 ] as const
 
-function ProjectStat({
-  icon,
-  value,
-  className,
-}: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  icon: React.ComponentType<any>
-  value: number
-  className?: string
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 text-sm text-foreground">
-      <DbIcon icon={icon} size={14} className={className ?? "text-muted-foreground"} />
-      {value}
-    </span>
-  )
-}
-
 function ProjectCard({ project }: { project: Project }) {
   return (
-    <button
-      type="button"
-      className="flex flex-col gap-3 rounded-md border border-border bg-background p-4 text-left transition-colors hover:bg-muted"
+    <div
+      role="button"
+      tabIndex={0}
+      className="flex cursor-pointer flex-col gap-3 rounded-md border border-border bg-background p-4 text-left transition-colors hover:bg-muted"
     >
       <div className="flex items-start gap-2">
         <FolderIcon size={16} className="mt-0.5 shrink-0 text-[var(--warning)]" />
         <span className="flex-1 truncate text-sm font-semibold text-foreground">{project.name}</span>
-        {project.privateProject && <LockIcon size={14} className="mt-0.5 shrink-0 text-muted-foreground" />}
         <span className="shrink-0 text-hint text-muted-foreground">{project.time}</span>
       </div>
       <p className="line-clamp-2 text-sm text-muted-foreground">{project.desc}</p>
       <div className="mt-1 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <ProjectStat icon={NotebookIcon} value={project.notebooks} className="text-primary" />
-          <ProjectStat icon={AppIcon} value={project.apps} className="text-[var(--warning)]" />
-          <ProjectStat icon={FileDocumentIcon} value={project.docs} />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 text-hint text-muted-foreground">
-            <SpeechBubbleIcon size={14} />
-            {project.threads} threads
-          </span>
-          <PencilIcon size={14} className="text-muted-foreground" />
-        </div>
+        <span className="inline-flex items-center gap-1 text-hint text-muted-foreground">
+          <SpeechBubbleIcon size={14} />
+          {project.chats} chats
+        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="New chat"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <NewChatIcon size={16} className="text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>New chat</TooltipContent>
+        </Tooltip>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -537,14 +517,8 @@ function ProjectsView() {
     <div className="flex flex-1 flex-col overflow-y-auto px-8 py-8">
       <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-6">
         {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-[22px] font-semibold leading-7 text-foreground">Projects</h2>
-            <p className="max-w-[520px] text-sm text-muted-foreground">
-              Group assets, threads, and scoped instructions for a broader effort. A project can span every
-              notebook in a pipeline — from source to gold.
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-[22px] font-semibold leading-7 text-foreground">Projects</h2>
           <Button size="sm" className="shrink-0 gap-1">
             <PlusIcon size={16} />
             New project

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import {
   SidebarCollapseIcon,
   OverflowIcon,
-  QueryEditorIcon,
+  NewChatIcon,
   SlidersIcon,
   CalendarClockIcon,
   SyncIcon,
@@ -42,7 +42,7 @@ type ThreadGroup = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ACTIONS: { id: string; label: string; icon: React.ComponentType<any>; badge?: number }[] = [
-  { id: "new-chat", label: "New chat", icon: QueryEditorIcon },
+  { id: "new-chat", label: "New chat", icon: NewChatIcon },
   { id: "schedules", label: "Schedules", icon: CalendarClockIcon },
   { id: "customizations", label: "Customizations", icon: SlidersIcon },
   { id: "projects", label: "Projects", icon: FolderIcon },
