@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils"
 import { AppShell, GenieThreadsPanel } from "@/components/shell"
 import { Button } from "@/components/ui/button"
 import { DbIcon } from "@/components/ui/db-icon"
+import { Input } from "@/components/ui/input"
+import { SegmentedControl, SegmentedItem } from "@/components/ui/segmented-control"
 import {
   Collapsible,
   CollapsibleContent,
@@ -45,6 +47,12 @@ import {
   SlidersIcon,
   CalendarClockIcon,
   ChartLineIcon,
+  AppIcon,
+  FileDocumentIcon,
+  SpeechBubbleIcon,
+  PencilIcon,
+  LockIcon,
+  SearchIcon,
 } from "@/components/icons"
 import { ThumbsUpIcon, ThumbsDownIcon, CopyIcon } from "lucide-react"
 
@@ -83,7 +91,7 @@ const CATEGORIES: Category[] = [
   },
   {
     id: "dashboards",
-    label: "Dashboards & reporting",
+    label: "Dashboards",
     icon: BarChartIcon,
     prompts: [
       "Build a dashboard summarizing my key metrics",
@@ -144,6 +152,7 @@ export default function GenieCodeProjects() {
   const [activeThreadId, setActiveThreadId] = React.useState<string>()
   const [awaitingApproval, setAwaitingApproval] = React.useState(false)
   const [canvasOpen, setCanvasOpen] = React.useState(false)
+  const [view, setView] = React.useState<"chat" | "projects">("chat")
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -204,13 +213,18 @@ export default function GenieCodeProjects() {
       <div className="m-2 flex flex-1 overflow-hidden rounded-md border border-border bg-background">
         {/* Threads panel — inside the card */}
         <GenieThreadsPanel
-          activeThreadId={activeThreadId}
-          onSelectThread={setActiveThreadId}
-          onNewChat={handleNewChat}
+          activeThreadId={view === "chat" ? activeThreadId : undefined}
+          onSelectThread={(id) => { setView("chat"); setActiveThreadId(id) }}
+          onNewChat={() => { setView("chat"); handleNewChat() }}
+          onSelectAction={(id) => setView(id === "projects" ? "projects" : "chat")}
+          activeAction={view === "projects" ? "projects" : undefined}
           activeStatus={awaitingApproval ? "Waiting for your approval" : undefined}
         />
 
-        {/* Chat column */}
+        {view === "projects" ? (
+          <ProjectsView />
+        ) : (
+        /* Chat column */
         <div className="flex flex-1 flex-col overflow-hidden">
           <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
             {isEmpty ? (
@@ -262,9 +276,12 @@ export default function GenieCodeProjects() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Workspace canvas — collapsed by default */}
-        <WorkspaceCanvas open={canvasOpen} onToggle={() => setCanvasOpen((v) => !v)} />
+        {/* Workspace canvas — collapsed by default; hidden in projects view */}
+        {view === "chat" && (
+          <WorkspaceCanvas open={canvasOpen} onToggle={() => setCanvasOpen((v) => !v)} />
+        )}
       </div>
     </AppShell>
   )
@@ -294,56 +311,64 @@ function EmptyState({
 
       <Composer input={input} setInput={setInput} tags={tags} setTags={setTags} onSubmit={onPick} className="w-full" />
 
-      {/* Expandable category suggestions */}
-      <div className="flex w-full flex-col items-center gap-2">
-        {CATEGORIES.map((cat) => {
-          const open = openCat === cat.id
-          const expandable = cat.prompts.length > 0
-          return (
-            <div key={cat.id} className="w-full">
-              {open ? (
-                /* Expanded: category header + starter prompts */
-                <div className="w-full rounded-md border border-border">
-                  <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-                    <DbIcon icon={cat.icon} size={16} className="text-muted-foreground" />
-                    <span className="flex-1 text-sm font-semibold text-foreground">{cat.label}</span>
-                    <Button variant="ghost" size="icon-xs" aria-label="Close" onClick={() => setOpenCat(undefined)}>
-                      <CloseIcon size={16} className="text-muted-foreground" />
-                    </Button>
-                  </div>
-                  <div className="flex flex-col">
-                    {cat.prompts.map((p, i) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => onPick(p)}
-                        className={cn(
-                          "px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]",
-                          i === 0 && "text-primary",
-                          i < cat.prompts.length - 1 && "border-b border-border",
-                        )}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
+      {/* Expandable category suggestions — pills wrap into as many rows as needed */}
+      <div className="flex w-full flex-col items-center gap-3">
+        <div className="flex flex-wrap justify-center gap-2">
+          {CATEGORIES.map((cat) => {
+            const expandable = cat.prompts.length > 0
+            const active = openCat === cat.id
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => (expandable ? setOpenCat(active ? undefined : cat.id) : onPick(cat.label))}
+                className={cn(
+                  "flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm transition-colors",
+                  active
+                    ? "border-primary bg-primary/5 text-primary"
+                    : "border-border text-foreground hover:bg-[var(--action-default-bg-hover)]",
+                )}
+              >
+                <DbIcon icon={cat.icon} size={16} className={active ? "text-primary" : "text-muted-foreground"} />
+                {cat.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Expanded category — starter prompts, full width below the pills */}
+        {openCat &&
+          (() => {
+            const cat = CATEGORIES.find((c) => c.id === openCat)
+            if (!cat || cat.prompts.length === 0) return null
+            return (
+              <div className="w-full rounded-md border border-border">
+                <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+                  <DbIcon icon={cat.icon} size={16} className="text-muted-foreground" />
+                  <span className="flex-1 text-sm font-semibold text-foreground">{cat.label}</span>
+                  <Button variant="ghost" size="icon-xs" aria-label="Close" onClick={() => setOpenCat(undefined)}>
+                    <CloseIcon size={16} className="text-muted-foreground" />
+                  </Button>
                 </div>
-              ) : (
-                /* Collapsed pill */
-                <div className="flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => (expandable ? setOpenCat(cat.id) : onPick(cat.label))}
-                    className="flex items-center gap-2 rounded-full border border-border px-3.5 py-1.5 text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]"
-                  >
-                    <DbIcon icon={cat.icon} size={16} className="text-muted-foreground" />
-                    {cat.label}
-                  </button>
+                <div className="flex flex-col">
+                  {cat.prompts.map((p, i) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => onPick(p)}
+                      className={cn(
+                        "px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]",
+                        i === 0 && "text-primary",
+                        i < cat.prompts.length - 1 && "border-b border-border",
+                      )}
+                    >
+                      {p}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
-          )
-        })}
+              </div>
+            )
+          })()}
       </div>
     </div>
   )
@@ -422,6 +447,148 @@ function AgenticResponse({
 
 // ─── Workspace canvas ────────────────────────────────────────────────────────────
 
+// ─── Projects view ───────────────────────────────────────────────────────────────
+
+type Project = {
+  id: string
+  name: string
+  desc: string
+  time: string
+  notebooks: number
+  apps: number
+  docs: number
+  threads: number
+  scope: "yours" | "org" | "shared"
+  /** private lock indicator */
+  privateProject?: boolean
+}
+
+const PROJECTS: Project[] = [
+  { id: "p1", name: "Lakeflow Designer Adoption", desc: "Track how teams adopt Lakeflow Designer across the org. Feeds the Q3 exec review.", time: "2h ago", notebooks: 3, apps: 1, docs: 1, threads: 3, scope: "yours", privateProject: true },
+  { id: "p2", name: "Customer Support Agent Reboot", desc: "Reboot the review-and-product-docs agent so it actually calls the right tool.", time: "yesterday", notebooks: 2, apps: 0, docs: 2, threads: 5, scope: "yours" },
+  { id: "p3", name: "Bronze → Silver Reviews Pipeline", desc: "Source → bronze → silver → gold. One project spanning every notebook in the flow.", time: "3d ago", notebooks: 4, apps: 1, docs: 0, threads: 4, scope: "org" },
+  { id: "p4", name: "Q3 Reviews Analytics", desc: "Quarterly deep-dive on review sentiment and product mentions.", time: "5d ago", notebooks: 1, apps: 2, docs: 3, threads: 3, scope: "shared" },
+]
+
+const PROJECT_TABS = [
+  { value: "yours", label: "Your projects" },
+  { value: "org", label: "Organization" },
+  { value: "shared", label: "Shared with you" },
+] as const
+
+function ProjectStat({
+  icon,
+  value,
+  className,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  icon: React.ComponentType<any>
+  value: number
+  className?: string
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 text-sm text-foreground">
+      <DbIcon icon={icon} size={14} className={className ?? "text-muted-foreground"} />
+      {value}
+    </span>
+  )
+}
+
+function ProjectCard({ project }: { project: Project }) {
+  return (
+    <button
+      type="button"
+      className="flex flex-col gap-3 rounded-md border border-border bg-background p-4 text-left transition-colors hover:bg-muted"
+    >
+      <div className="flex items-start gap-2">
+        <FolderIcon size={16} className="mt-0.5 shrink-0 text-[var(--warning)]" />
+        <span className="flex-1 truncate text-sm font-semibold text-foreground">{project.name}</span>
+        {project.privateProject && <LockIcon size={14} className="mt-0.5 shrink-0 text-muted-foreground" />}
+        <span className="shrink-0 text-hint text-muted-foreground">{project.time}</span>
+      </div>
+      <p className="line-clamp-2 text-sm text-muted-foreground">{project.desc}</p>
+      <div className="mt-1 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <ProjectStat icon={NotebookIcon} value={project.notebooks} className="text-primary" />
+          <ProjectStat icon={AppIcon} value={project.apps} className="text-[var(--warning)]" />
+          <ProjectStat icon={FileDocumentIcon} value={project.docs} />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 text-hint text-muted-foreground">
+            <SpeechBubbleIcon size={14} />
+            {project.threads} threads
+          </span>
+          <PencilIcon size={14} className="text-muted-foreground" />
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function ProjectsView() {
+  const [tab, setTab] = React.useState<string>("yours")
+  const [search, setSearch] = React.useState("")
+
+  const projects = PROJECTS.filter(
+    (p) => p.scope === tab && (!search || p.name.toLowerCase().includes(search.toLowerCase())),
+  )
+
+  return (
+    <div className="flex flex-1 flex-col overflow-y-auto px-8 py-8">
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-6">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold leading-8 text-foreground">Projects</h1>
+            <p className="max-w-[520px] text-sm text-muted-foreground">
+              Group assets, threads, and scoped instructions for a broader effort. A project can span every
+              notebook in a pipeline — from source to gold.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="relative">
+              <SearchIcon
+                size={16}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search projects"
+                className="h-8 w-48 pl-8"
+              />
+            </div>
+            <Button size="sm" className="gap-1">
+              <PlusIcon size={16} />
+              New project
+            </Button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <SegmentedControl value={tab} onValueChange={setTab}>
+          {PROJECT_TABS.map((t) => (
+            <SegmentedItem key={t.value} value={t.value}>{t.label}</SegmentedItem>
+          ))}
+        </SegmentedControl>
+
+        {/* Card grid */}
+        {projects.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border px-4 py-12 text-center">
+            <p className="text-sm text-muted-foreground">No projects here yet.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {projects.map((project) => (
+              <ProjectCard key={project.id} project={project} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function WorkspaceCanvas({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   // Collapsed: slim rail with an expand button so the panel can be reopened.
   if (!open) {
@@ -435,18 +602,17 @@ function WorkspaceCanvas({ open, onToggle }: { open: boolean; onToggle: () => vo
   }
 
   return (
-    <aside className="flex w-[320px] shrink-0 flex-col border-l border-border">
+    <aside className="flex w-[320px] shrink-0 flex-col border-l border-border bg-secondary">
       <div className="flex h-11 shrink-0 items-center justify-end px-2">
         <Button variant="ghost" size="icon-xs" aria-label="Collapse canvas" onClick={onToggle}>
           <SidebarCollapseIcon size={16} className="text-muted-foreground" />
         </Button>
       </div>
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
-        <div className="flex h-24 w-32 items-center justify-center rounded-md border border-border bg-secondary">
+        <div className="flex h-24 w-32 items-center justify-center rounded-md border border-border bg-background">
           <ChartLineIcon size={40} className="text-muted-foreground/50" />
         </div>
         <div className="flex flex-col gap-1.5">
-          <p className="text-sm font-semibold text-foreground">Workspace canvas</p>
           <p className="text-hint text-muted-foreground">
             As you work, the files and assets you create and edit open in this space for you to review.
           </p>

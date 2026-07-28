@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import {
   SidebarCollapseIcon,
   OverflowIcon,
-  PencilIcon,
+  QueryEditorIcon,
   SlidersIcon,
   CalendarClockIcon,
   SyncIcon,
@@ -42,7 +42,7 @@ type ThreadGroup = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ACTIONS: { id: string; label: string; icon: React.ComponentType<any>; badge?: number }[] = [
-  { id: "new-chat", label: "New chat", icon: PencilIcon },
+  { id: "new-chat", label: "New chat", icon: QueryEditorIcon },
   { id: "schedules", label: "Schedules", icon: CalendarClockIcon },
   { id: "customizations", label: "Customizations", icon: SlidersIcon },
   { id: "projects", label: "Projects", icon: FolderIcon },
@@ -143,6 +143,10 @@ interface GenieThreadsPanelProps {
   activeThreadId?: string
   onSelectThread?: (id: string) => void
   onNewChat?: () => void
+  /** Fired when an action row (schedules, customizations, projects, inbox) is clicked */
+  onSelectAction?: (id: string) => void
+  /** Highlight the action row with this id as active (e.g. "projects") */
+  activeAction?: string
   /** Status label shown on the active thread (e.g. "Waiting for your approval") */
   activeStatus?: string
   className?: string
@@ -152,6 +156,8 @@ export function GenieThreadsPanel({
   activeThreadId,
   onSelectThread,
   onNewChat,
+  onSelectAction,
+  activeAction,
   activeStatus,
   className,
 }: GenieThreadsPanelProps) {
@@ -176,22 +182,30 @@ export function GenieThreadsPanel({
 
       {/* Action rows */}
       <div className="flex flex-col gap-0.5 px-3 pb-2">
-        {ACTIONS.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            onClick={action.id === "new-chat" ? onNewChat : undefined}
-            className="group flex h-8 items-center gap-2 rounded px-2 text-left text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]"
-          >
-            <DbIcon icon={action.icon} size={16} className="text-muted-foreground" />
-            <span className="flex-1 truncate">{action.label}</span>
-            {action.badge != null && (
-              <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-semibold leading-none text-primary-foreground">
-                {action.badge}
-              </span>
-            )}
-          </button>
-        ))}
+        {ACTIONS.map((action) => {
+          const active = activeAction === action.id
+          return (
+            <button
+              key={action.id}
+              type="button"
+              onClick={action.id === "new-chat" ? onNewChat : () => onSelectAction?.(action.id)}
+              className={cn(
+                "group flex h-8 items-center gap-2 rounded px-2 text-left text-sm transition-colors",
+                active
+                  ? "bg-primary/10 text-primary font-semibold"
+                  : "text-foreground hover:bg-[var(--action-default-bg-hover)]",
+              )}
+            >
+              <DbIcon icon={action.icon} size={16} className={active ? "text-primary" : "text-muted-foreground"} />
+              <span className="flex-1 truncate">{action.label}</span>
+              {action.badge != null && (
+                <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-semibold leading-none text-primary-foreground">
+                  {action.badge}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* Search */}

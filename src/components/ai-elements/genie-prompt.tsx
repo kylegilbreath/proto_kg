@@ -350,9 +350,11 @@ export function GeniePrompt({
         <div className={cn("min-h-6", isSmall && "min-h-5")}>{inputRow}</div>
         {/* action bar */}
         <div className="flex items-center gap-2">
-          {plusButton}
-          {showAtButton && atButton}
-          {projectLabel && projectButton}
+          <div className="flex items-center gap-1">
+            {plusButton}
+            {showAtButton && atButton}
+            {projectLabel && projectButton}
+          </div>
           <div className="flex-1" />
           <ModelSelector modelName={modelName} />
           <SubmitButton mode={mode} size={size} />
