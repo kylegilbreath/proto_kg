@@ -53,18 +53,6 @@ const ACTIONS: { id: string; label: string; icon: React.ComponentType<any>; badg
 
 const GROUPS: ThreadGroup[] = [
   {
-    label: "Pinned",
-    threads: [
-      {
-        id: "p1",
-        title: "Ontology and Knowledge Snippets Search",
-        preview: "Search finds NFL ontology knowledge snippets",
-        time: "Jun 23",
-        done: true,
-      },
-    ],
-  },
-  {
     label: "Scheduled",
     threads: [],
   },
@@ -86,6 +74,15 @@ const GROUPS: ThreadGroup[] = [
       { id: "c13", title: "Churn Prediction Demo Planning and …", preview: "can you show me an example plan", time: "5d" },
     ],
   },
+]
+
+// Two-tier Projects section: each project expands to the threads it owns.
+type PanelProject = { id: string; name: string; threadIds: string[] }
+
+const PANEL_PROJECTS: PanelProject[] = [
+  { id: "pr1", name: "Lakeflow Designer Adoption", threadIds: ["c4", "c5"] },
+  { id: "pr2", name: "Customer Support Agent Reboot", threadIds: ["c2", "c3"] },
+  { id: "pr3", name: "Q3 Reviews Analytics", threadIds: ["c7", "c8", "c9"] },
 ]
 
 // ─── Exported lookups (so the page can render a selected thread) ────────────────
@@ -178,10 +175,18 @@ export function GenieThreadsPanel({
   className,
 }: GenieThreadsPanelProps) {
   const [search, setSearch] = React.useState("")
-  // Group headers (Pinned / Scheduled / Chats) are collapsible; start expanded.
-  const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({})
+  // Group headers (Scheduled / Chats) are collapsible. Empty groups (Scheduled)
+  // start collapsed; the rest start expanded.
+  const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>(() =>
+    Object.fromEntries(GROUPS.filter((g) => g.threads.length === 0).map((g) => [g.label, true])),
+  )
   const toggleGroup = (label: string) =>
     setCollapsed((prev) => ({ ...prev, [label]: !prev[label] }))
+  // Projects section (top) + per-project expand state.
+  const [projectsOpen, setProjectsOpen] = React.useState(true)
+  const [openProjects, setOpenProjects] = React.useState<Record<string, boolean>>({})
+  const toggleProject = (id: string) =>
+    setOpenProjects((prev) => ({ ...prev, [id]: !prev[id] }))
 
   return (
     <aside className={cn("flex w-[280px] shrink-0 flex-col border-r border-border", className)}>
@@ -251,6 +256,65 @@ export function GenieThreadsPanel({
           "[&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/40",
         )}
       >
+        {/* Projects — two-tier: project → its threads */}
+        {!search && (
+          <div className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              onClick={() => setProjectsOpen((v) => !v)}
+              className="group/header flex h-6 w-full items-center rounded px-2 text-left transition-colors hover:bg-[var(--action-default-bg-hover)]"
+            >
+              <span className="text-xs font-normal text-muted-foreground">Projects</span>
+              <ChevronRightIcon
+                size={12}
+                className={cn(
+                  "ml-auto shrink-0 text-muted-foreground transition-all duration-150",
+                  projectsOpen ? "rotate-90 opacity-0 group-hover/header:opacity-100" : "opacity-100",
+                )}
+              />
+            </button>
+            {projectsOpen &&
+              PANEL_PROJECTS.map((project) => {
+                const expanded = !!openProjects[project.id]
+                return (
+                  <div key={project.id} className="flex flex-col gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleProject(project.id)}
+                      className="group/proj flex h-7 w-full items-center gap-1.5 rounded px-2 text-left text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]"
+                    >
+                      <ChevronRightIcon
+                        size={12}
+                        className={cn("shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
+                      />
+                      <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+                      <span className="flex-1 truncate">{project.name}</span>
+                    </button>
+                    {expanded &&
+                      project.threadIds.map((tid) => {
+                        const thread = GENIE_THREADS[tid]
+                        if (!thread) return null
+                        const active = activeThreadId === tid
+                        return (
+                          <button
+                            key={tid}
+                            type="button"
+                            onClick={() => onSelectThread?.(tid)}
+                            className={cn(
+                              "flex h-7 w-full items-center rounded py-1.5 pl-9 pr-2 text-left text-sm transition-colors",
+                              active ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-[var(--action-default-bg-hover)]",
+                            )}
+                          >
+                            <span className="truncate">{thread.title}</span>
+                          </button>
+                        )
+                      })}
+                  </div>
+                )
+              })}
+          </div>
+        )}
+
         {GROUPS.map((group) => {
           const threads = search
             ? group.threads.filter(
