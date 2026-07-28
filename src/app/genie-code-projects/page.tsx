@@ -491,6 +491,7 @@ function Composer({
       placeholder="@ for objects, / for commands, ↑↓ for history"
       modelName="Auto"
       showAtButton
+      projectLabel
       className={className}
     />
   )

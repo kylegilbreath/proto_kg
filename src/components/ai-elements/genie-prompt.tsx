@@ -10,6 +10,7 @@ import {
   CloseSmallIcon,
   ColumnIcon,
   DagHorizontalIcon,
+  FolderIcon,
   NotebookIcon,
   PlusIcon,
   SearchIcon,
@@ -53,6 +54,10 @@ export interface GeniePromptProps {
   modelName?: string;
   /** Show an "@" mention button next to "+" in the chat action bar */
   showAtButton?: boolean;
+  /** Show a "Choose project" folder selector in the chat action bar. Pass a
+   *  string to show the selected project name, or true for the default label. */
+  projectLabel?: string | boolean;
+  onChooseProject?: () => void;
   placeholder?: string;
   className?: string;
 }
@@ -177,6 +182,8 @@ export function GeniePrompt({
   onTagRemove,
   modelName,
   showAtButton = false,
+  projectLabel = false,
+  onChooseProject,
   placeholder,
   className,
 }: GeniePromptProps) {
@@ -271,6 +278,20 @@ export function GeniePrompt({
     </button>
   );
 
+  const projectButton = (
+    <button
+      type="button"
+      onClick={onChooseProject}
+      className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground shrink-0"
+    >
+      <FolderIcon size={16} className="text-[var(--warning)]" />
+      <span className="whitespace-nowrap text-foreground">
+        {typeof projectLabel === "string" ? projectLabel : "Choose project"}
+      </span>
+      <ChevronDownIcon size={16} className="shrink-0" />
+    </button>
+  );
+
   // ── Variant: toggle ───────────────────────────────────────────────────────
 
   if (variant === "toggle") {
@@ -331,6 +352,7 @@ export function GeniePrompt({
         <div className="flex items-center gap-2">
           {plusButton}
           {showAtButton && atButton}
+          {projectLabel && projectButton}
           <div className="flex-1" />
           <ModelSelector modelName={modelName} />
           <SubmitButton mode={mode} size={size} />

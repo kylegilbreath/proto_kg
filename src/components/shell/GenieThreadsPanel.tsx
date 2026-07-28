@@ -15,6 +15,7 @@ import {
   SearchIcon,
   CheckIcon,
   ChevronRightIcon,
+  FolderIcon,
 } from "@/components/icons"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -44,6 +45,7 @@ const ACTIONS: { id: string; label: string; icon: React.ComponentType<any>; badg
   { id: "new-chat", label: "New chat", icon: PencilIcon },
   { id: "schedules", label: "Schedules", icon: CalendarClockIcon },
   { id: "customizations", label: "Customizations", icon: SlidersIcon },
+  { id: "projects", label: "Projects", icon: FolderIcon },
   { id: "inbox", label: "Inbox", icon: SyncIcon, badge: 5 },
 ]
 
