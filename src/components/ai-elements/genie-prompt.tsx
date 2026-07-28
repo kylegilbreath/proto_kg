@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import {
   ArrowRightIcon,
   ArrowUpIcon,
+  AtIcon,
   ChevronDownIcon,
   CloseSmallIcon,
   ColumnIcon,
@@ -50,6 +51,8 @@ export interface GeniePromptProps {
   onTagRemove?: (id: string) => void;
   /** Model name shown in model selector */
   modelName?: string;
+  /** Show an "@" mention button next to "+" in the chat action bar */
+  showAtButton?: boolean;
   placeholder?: string;
   className?: string;
 }
@@ -173,6 +176,7 @@ export function GeniePrompt({
   tags = [],
   onTagRemove,
   modelName,
+  showAtButton = false,
   placeholder,
   className,
 }: GeniePromptProps) {
@@ -254,6 +258,19 @@ export function GeniePrompt({
     </button>
   );
 
+  const atButton = (
+    <button
+      type="button"
+      className={cn(
+        "flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground shrink-0",
+        isSmall ? "h-6 w-6" : "h-8 w-8"
+      )}
+      aria-label="Mention an object"
+    >
+      <AtIcon size={16} />
+    </button>
+  );
+
   // ── Variant: toggle ───────────────────────────────────────────────────────
 
   if (variant === "toggle") {
@@ -313,6 +330,7 @@ export function GeniePrompt({
         {/* action bar */}
         <div className="flex items-center gap-2">
           {plusButton}
+          {showAtButton && atButton}
           <div className="flex-1" />
           <ModelSelector modelName={modelName} />
           <SubmitButton mode={mode} size={size} />

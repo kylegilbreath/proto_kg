@@ -11,7 +11,7 @@ import {
   PencilIcon,
   SlidersIcon,
   CalendarClockIcon,
-  RobotIcon,
+  SyncIcon,
   SearchIcon,
   CheckIcon,
 } from "@/components/icons"
@@ -27,6 +27,8 @@ type Thread = {
   done?: boolean
   /** e.g. "+8 · 2 assets" shown after the preview */
   meta?: string
+  /** transient status shown instead of the preview (e.g. awaiting approval) */
+  status?: string
 }
 
 type ThreadGroup = {
@@ -37,11 +39,11 @@ type ThreadGroup = {
 // ─── Action rows ──────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ACTIONS: { id: string; label: string; icon: React.ComponentType<any> }[] = [
+const ACTIONS: { id: string; label: string; icon: React.ComponentType<any>; badge?: number }[] = [
   { id: "new-chat", label: "New chat", icon: PencilIcon },
-  { id: "customizations", label: "Customizations", icon: SlidersIcon },
   { id: "schedules", label: "Schedules", icon: CalendarClockIcon },
-  { id: "zeroops-inbox", label: "ZeroOps Inbox", icon: RobotIcon },
+  { id: "customizations", label: "Customizations", icon: SlidersIcon },
+  { id: "inbox", label: "Inbox", icon: SyncIcon, badge: 5 },
 ]
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
@@ -110,15 +112,23 @@ function ThreadRow({
         <span className={cn("flex-1 truncate text-sm", active ? "text-primary font-semibold" : "text-foreground")}>
           {thread.title}
         </span>
-        <span className="shrink-0 text-hint text-muted-foreground">{thread.time}</span>
+        {thread.status ? (
+          <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden />
+        ) : (
+          <span className="shrink-0 text-hint text-muted-foreground">{thread.time}</span>
+        )}
       </div>
-      {thread.preview && (
-        <div className="flex items-center gap-1 pl-0">
-          <span className="truncate text-hint text-muted-foreground">{thread.preview}</span>
-          {thread.meta && (
-            <span className="shrink-0 text-hint text-[var(--success)]">{thread.meta}</span>
-          )}
-        </div>
+      {thread.status ? (
+        <span className="truncate text-hint text-primary">{thread.status}</span>
+      ) : (
+        thread.preview && (
+          <div className="flex items-center gap-1 pl-0">
+            <span className="truncate text-hint text-muted-foreground">{thread.preview}</span>
+            {thread.meta && (
+              <span className="shrink-0 text-hint text-[var(--success)]">{thread.meta}</span>
+            )}
+          </div>
+        )
       )}
     </button>
   )
@@ -130,6 +140,8 @@ interface GenieThreadsPanelProps {
   activeThreadId?: string
   onSelectThread?: (id: string) => void
   onNewChat?: () => void
+  /** Status label shown on the active thread (e.g. "Waiting for your approval") */
+  activeStatus?: string
   className?: string
 }
 
@@ -137,12 +149,13 @@ export function GenieThreadsPanel({
   activeThreadId,
   onSelectThread,
   onNewChat,
+  activeStatus,
   className,
 }: GenieThreadsPanelProps) {
   const [search, setSearch] = React.useState("")
 
   return (
-    <aside className={cn("flex w-[280px] shrink-0 flex-col bg-secondary", className)}>
+    <aside className={cn("flex w-[280px] shrink-0 flex-col border-r border-border", className)}>
       {/* Header */}
       <div className="flex h-11 shrink-0 items-center gap-2 px-3">
         <span className="flex-1 text-sm font-semibold text-foreground">Genie Code</span>
@@ -164,7 +177,12 @@ export function GenieThreadsPanel({
             className="group flex h-8 items-center gap-2 rounded px-2 text-left text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]"
           >
             <DbIcon icon={action.icon} size={16} className="text-muted-foreground" />
-            <span className="truncate">{action.label}</span>
+            <span className="flex-1 truncate">{action.label}</span>
+            {action.badge != null && (
+              <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-semibold leading-none text-primary-foreground">
+                {action.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -180,7 +198,7 @@ export function GenieThreadsPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search chats"
-            className="h-8 bg-background pl-8"
+            className="h-8 bg-secondary pl-8"
           />
         </div>
       </div>
@@ -211,14 +229,17 @@ export function GenieThreadsPanel({
               {threads.length === 0 ? (
                 <span className="px-2 py-1 text-hint text-muted-foreground/70">None</span>
               ) : (
-                threads.map((thread) => (
-                  <ThreadRow
-                    key={thread.id}
-                    thread={thread}
-                    active={activeThreadId === thread.id}
-                    onClick={() => onSelectThread?.(thread.id)}
-                  />
-                ))
+                threads.map((thread) => {
+                  const active = activeThreadId === thread.id
+                  return (
+                    <ThreadRow
+                      key={thread.id}
+                      thread={active && activeStatus ? { ...thread, status: activeStatus } : thread}
+                      active={active}
+                      onClick={() => onSelectThread?.(thread.id)}
+                    />
+                  )
+                })
               )}
             </div>
           )
