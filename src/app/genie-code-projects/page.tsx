@@ -539,38 +539,39 @@ function ProjectsView() {
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold leading-8 text-foreground">Projects</h1>
+            <h2 className="text-[22px] font-semibold leading-7 text-foreground">Projects</h2>
             <p className="max-w-[520px] text-sm text-muted-foreground">
               Group assets, threads, and scoped instructions for a broader effort. A project can span every
               notebook in a pipeline — from source to gold.
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="relative">
-              <SearchIcon
-                size={16}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search projects"
-                className="h-8 w-48 pl-8"
-              />
-            </div>
-            <Button size="sm" className="gap-1">
-              <PlusIcon size={16} />
-              New project
-            </Button>
-          </div>
+          <Button size="sm" className="shrink-0 gap-1">
+            <PlusIcon size={16} />
+            New project
+          </Button>
         </div>
 
-        {/* Tabs */}
-        <SegmentedControl value={tab} onValueChange={setTab}>
-          {PROJECT_TABS.map((t) => (
-            <SegmentedItem key={t.value} value={t.value}>{t.label}</SegmentedItem>
-          ))}
-        </SegmentedControl>
+        {/* Tabs + search */}
+        <div className="flex items-center gap-4">
+          <SegmentedControl value={tab} onValueChange={setTab}>
+            {PROJECT_TABS.map((t) => (
+              <SegmentedItem key={t.value} value={t.value}>{t.label}</SegmentedItem>
+            ))}
+          </SegmentedControl>
+          <div className="flex-1" />
+          <div className="relative shrink-0">
+            <SearchIcon
+              size={16}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search projects"
+              className="h-8 w-48 pl-8"
+            />
+          </div>
+        </div>
 
         {/* Card grid */}
         {projects.length === 0 ? (
