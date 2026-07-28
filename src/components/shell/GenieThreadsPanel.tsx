@@ -14,6 +14,7 @@ import {
   SyncIcon,
   SearchIcon,
   CheckIcon,
+  ChevronRightIcon,
 } from "@/components/icons"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -153,6 +154,10 @@ export function GenieThreadsPanel({
   className,
 }: GenieThreadsPanelProps) {
   const [search, setSearch] = React.useState("")
+  // Group headers (Pinned / Scheduled / Chats) are collapsible; start expanded.
+  const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({})
+  const toggleGroup = (label: string) =>
+    setCollapsed((prev) => ({ ...prev, [label]: !prev[label] }))
 
   return (
     <aside className={cn("flex w-[280px] shrink-0 flex-col border-r border-border", className)}>
@@ -223,24 +228,44 @@ export function GenieThreadsPanel({
               )
             : group.threads
           if (search && threads.length === 0) return null
+          // Search forces groups open so results are always visible.
+          const isCollapsed = !search && !!collapsed[group.label]
           return (
             <div key={group.label} className="flex flex-col gap-0.5">
-              <span className="px-2 text-xs font-normal text-muted-foreground">{group.label}</span>
-              {threads.length === 0 ? (
-                <span className="px-2 py-1 text-hint text-muted-foreground/70">None</span>
-              ) : (
-                threads.map((thread) => {
-                  const active = activeThreadId === thread.id
-                  return (
-                    <ThreadRow
-                      key={thread.id}
-                      thread={active && activeStatus ? { ...thread, status: activeStatus } : thread}
-                      active={active}
-                      onClick={() => onSelectThread?.(thread.id)}
-                    />
-                  )
-                })
-              )}
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.label)}
+                className="group/header flex h-6 w-full items-center rounded px-2 text-left transition-colors hover:bg-[var(--action-default-bg-hover)]"
+              >
+                <span className="text-xs font-normal text-muted-foreground">{group.label}</span>
+                <ChevronRightIcon
+                  size={12}
+                  className={cn(
+                    "ml-auto shrink-0 text-muted-foreground transition-all duration-150",
+                    // Collapsed: always visible, points right.
+                    // Expanded: hidden until hover, points down.
+                    isCollapsed
+                      ? "opacity-100"
+                      : "rotate-90 opacity-0 group-hover/header:opacity-100",
+                  )}
+                />
+              </button>
+              {!isCollapsed &&
+                (threads.length === 0 ? (
+                  <span className="px-2 py-1 text-hint text-muted-foreground/70">None</span>
+                ) : (
+                  threads.map((thread) => {
+                    const active = activeThreadId === thread.id
+                    return (
+                      <ThreadRow
+                        key={thread.id}
+                        thread={active && activeStatus ? { ...thread, status: activeStatus } : thread}
+                        active={active}
+                        onClick={() => onSelectThread?.(thread.id)}
+                      />
+                    )
+                  })
+                ))}
             </div>
           )
         })}
