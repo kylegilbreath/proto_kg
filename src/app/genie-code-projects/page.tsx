@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import {
   Dialog,
   DialogContent,
@@ -448,13 +449,50 @@ function EmptyState({
   setTags: React.Dispatch<React.SetStateAction<GenieTag[]>>
 }) {
   const [openCat, setOpenCat] = React.useState<string>()
+  const [projectName, setProjectName] = React.useState<string>()
+  const [projectPopoverOpen, setProjectPopoverOpen] = React.useState(false)
 
   return (
     <div className="mx-auto flex w-full max-w-[560px] flex-1 flex-col items-center justify-center gap-6 px-6 py-10">
       <DbIcon icon={GenieCodeIcon} color="ai" size={48} />
       <h1 className="text-center text-2xl font-semibold leading-8 text-foreground">What can I help you build?</h1>
 
-      <Composer input={input} setInput={setInput} tags={tags} setTags={setTags} onSubmit={onPick} className="w-full" showProject />
+      <Popover open={projectPopoverOpen} onOpenChange={setProjectPopoverOpen}>
+        {/* Anchor the popover on the composer; the project button toggles it */}
+        <PopoverTrigger asChild>
+          <div className="w-full">
+            <Composer
+              input={input}
+              setInput={setInput}
+              tags={tags}
+              setTags={setTags}
+              onSubmit={onPick}
+              className="w-full"
+              showProject
+              projectName={projectName}
+              onChooseProject={() => setProjectPopoverOpen((v) => !v)}
+            />
+          </div>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[280px] p-1">
+          <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
+          {PROJECTS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => { setProjectName(p.name); setProjectPopoverOpen(false) }}
+              className={cn(
+                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+                projectName === p.name ? "text-primary" : "text-foreground",
+              )}
+            >
+              <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+              <span className="flex-1 truncate">{p.name}</span>
+              {projectName === p.name && <CheckIcon size={14} className="shrink-0 text-primary" />}
+            </button>
+          ))}
+        </PopoverContent>
+      </Popover>
 
       {/* Expandable category suggestions — pills wrap into as many rows as needed */}
       <div className="flex w-full flex-col items-center gap-3">
@@ -1133,6 +1171,8 @@ function Composer({
   onSubmit,
   className,
   showProject = false,
+  projectName,
+  onChooseProject,
 }: {
   input: string
   setInput: (v: string) => void
@@ -1142,6 +1182,9 @@ function Composer({
   className?: string
   /** Show the "Choose project" selector — only before a chat has started */
   showProject?: boolean
+  /** Selected project name shown on the selector (defaults to "Choose project") */
+  projectName?: string
+  onChooseProject?: () => void
 }) {
   return (
     <GeniePrompt
@@ -1154,7 +1197,8 @@ function Composer({
       placeholder="@ for objects, / for commands, ↑↓ for history"
       modelName="Auto"
       showAtButton
-      projectLabel={showProject}
+      projectLabel={showProject ? (projectName ?? true) : false}
+      onChooseProject={onChooseProject}
       className={className}
     />
   )
