@@ -26,6 +26,12 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu"
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -75,6 +81,9 @@ import {
   ShareIcon,
   FileDocumentIcon,
   FolderOpenIcon,
+  CatalogIcon,
+  TableIcon,
+  UploadIcon,
 } from "@/components/icons"
 import { ThumbsUpIcon, ThumbsDownIcon, CopyIcon } from "lucide-react"
 
@@ -933,18 +942,75 @@ function ProjectDetail({
                 Assets keep their workspace folder structure — attach a folder or an individual notebook, and
                 it appears here right where it lives in your workspace.
               </p>
-              <Button variant="default" size="sm" className="shrink-0 gap-1" onClick={() => setAddAssetOpen(true)}>
-                <PlusIcon size={16} />
-                Add asset
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="default" size="sm" className="shrink-0 gap-1">
+                    <PlusIcon size={16} />
+                    Add asset
+                    <ChevronDownIcon size={16} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem onClick={() => setAddAssetOpen(true)}>
+                    <FolderOpenIcon size={16} className="text-muted-foreground" />
+                    From workspace
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <CatalogIcon size={16} className="text-muted-foreground" />
+                    From Unity Catalog
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <UploadIcon size={16} className="text-muted-foreground" />
+                    Upload file
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
+
+            {/* Workspace */}
             <div className="rounded-md border border-border">
               <div className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Assets in scope <span className="mx-1 font-normal">·</span> 3 notebooks
+                Workspace <span className="mx-1 font-normal">·</span> 3 notebooks
                 <span className="mx-1 font-normal">·</span> 1 dashboards
                 <span className="mx-1 font-normal">·</span> 1 files
               </div>
               <AssetTree />
+            </div>
+
+            {/* Unity Catalog */}
+            <div className="rounded-md border border-border">
+              <div className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Unity Catalog <span className="mx-1 font-normal">·</span> 2 tables
+                <span className="mx-1 font-normal">·</span> 1 schema
+                <span className="mx-1 font-normal">·</span> 1 volume
+              </div>
+              <div className="flex flex-col py-1">
+                {UC_ASSETS.map((a) => (
+                  <div key={a.name} className="flex items-center gap-2 px-3 py-1.5">
+                    <DbIcon icon={a.icon} size={16} className="shrink-0 text-primary" />
+                    <span className="truncate text-sm text-foreground">{a.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Local / uploaded files */}
+            <div className="rounded-md border border-border">
+              <div className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Local files
+              </div>
+              <div className="p-4">
+                <button
+                  type="button"
+                  className="flex w-full flex-col items-center gap-2 rounded-md border border-dashed border-border px-4 py-8 text-center transition-colors hover:bg-muted"
+                >
+                  <UploadIcon size={24} className="text-muted-foreground/50" />
+                  <span className="text-sm font-semibold text-foreground">Upload a file</span>
+                  <span className="text-hint text-muted-foreground">
+                    Drop a PDF, CSV, or other file, or click to browse.
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -982,6 +1048,14 @@ const ASSET_ITEMS: AssetItem[] = [
   { name: "retention_signals", icon: NotebookIcon, color: "text-primary" },
   { name: "Adoption Dashboard", icon: DashboardIcon, color: "text-[var(--success)]" },
   { name: "exec_readout.md", icon: FileDocumentIcon, color: "text-muted-foreground" },
+]
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const UC_ASSETS: { name: string; icon: React.ComponentType<any> }[] = [
+  { name: "main.lakeflow.adoption_events", icon: TableIcon },
+  { name: "main.lakeflow.team_rollup", icon: TableIcon },
+  { name: "main.lakeflow", icon: SchemaIcon },
+  { name: "main.lakeflow.exports", icon: DatabaseIcon },
 ]
 
 function AssetTree() {
