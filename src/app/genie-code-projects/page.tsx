@@ -339,6 +339,7 @@ export default function GenieCodeProjects() {
           /* Selected an existing thread — show its transcript */
           <ThreadView
             threadId={activeThreadId}
+            dynamicThread={dynamicThreads.find((t) => t.id === activeThreadId)}
             input={input}
             setInput={setInput}
             tags={tags}
@@ -468,6 +469,7 @@ const GENERIC_TRANSCRIPT: ThreadTurn[] = [
 
 function ThreadView({
   threadId,
+  dynamicThread,
   input,
   setInput,
   tags,
@@ -476,6 +478,7 @@ function ThreadView({
   onOpenProject,
 }: {
   threadId: string
+  dynamicThread?: DynamicThread
   input: string
   setInput: (v: string) => void
   tags: GenieTag[]
@@ -486,7 +489,11 @@ function ThreadView({
   const thread = GENIE_THREADS[threadId]
   const turns = THREAD_TRANSCRIPTS[threadId] ?? GENERIC_TRANSCRIPT
   const assetCount = threadAssetCount(thread)
-  const project = threadProject(threadId)
+  // Resolve the owning project from the static map or the dynamic (session) thread.
+  const project =
+    threadProject(threadId) ??
+    (dynamicThread?.projectId ? { id: dynamicThread.projectId, name: dynamicThread.projectName ?? "" } : undefined)
+  const title = thread?.title ?? dynamicThread?.title ?? "Untitled chat"
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -504,9 +511,7 @@ function ThreadView({
             <span className="text-muted-foreground/50" aria-hidden>/</span>
           </>
         )}
-        <span className="truncate text-sm font-semibold text-foreground">
-          {thread?.title ?? "Untitled chat"}
-        </span>
+        <span className="truncate text-sm font-semibold text-foreground">{title}</span>
       </div>
 
       {/* Transcript */}
