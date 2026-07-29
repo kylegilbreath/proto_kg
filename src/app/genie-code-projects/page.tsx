@@ -692,19 +692,18 @@ type Project = {
   desc: string
   time: string
   chats: number
-  scope: "yours" | "org" | "shared"
+  scope: "yours" | "shared"
 }
 
 const PROJECTS: Project[] = [
   { id: "p1", name: "Lakeflow Designer Adoption", desc: "Track how teams adopt Lakeflow Designer across the org. Feeds the Q3 exec review.", time: "2h ago", chats: 3, scope: "yours" },
   { id: "p2", name: "Customer Support Agent Reboot", desc: "Reboot the review-and-product-docs agent so it actually calls the right tool.", time: "yesterday", chats: 5, scope: "yours" },
-  { id: "p3", name: "Bronze → Silver Reviews Pipeline", desc: "Source → bronze → silver → gold. One project spanning every notebook in the flow.", time: "3d ago", chats: 4, scope: "org" },
+  { id: "p3", name: "Bronze → Silver Reviews Pipeline", desc: "Source → bronze → silver → gold. One project spanning every notebook in the flow.", time: "3d ago", chats: 4, scope: "shared" },
   { id: "p4", name: "Q3 Reviews Analytics", desc: "Quarterly deep-dive on review sentiment and product mentions.", time: "5d ago", chats: 3, scope: "shared" },
 ]
 
 const PROJECT_TABS = [
   { value: "yours", label: "Your projects" },
-  { value: "org", label: "Workspace" },
   { value: "shared", label: "Shared with you" },
 ] as const
 
