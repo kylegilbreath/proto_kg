@@ -282,13 +282,14 @@ export function GeniePrompt({
     <button
       type="button"
       onClick={onChooseProject}
-      className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground shrink-0"
+      // Padded ghost button, matching the workspace selector in the top nav.
+      className="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]"
     >
-      <FolderIcon size={16} className="text-[var(--warning)]" />
-      <span className="whitespace-nowrap text-foreground">
+      <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+      <span className="whitespace-nowrap">
         {typeof projectLabel === "string" ? projectLabel : "Choose project"}
       </span>
-      <ChevronDownIcon size={16} className="shrink-0" />
+      <ChevronDownIcon size={16} className="shrink-0 text-muted-foreground" />
     </button>
   );
 
