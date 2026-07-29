@@ -252,6 +252,7 @@ export default function GenieCodeProjects() {
           <ProjectDetail
             project={PROJECTS.find((p) => p.id === selectedProjectId) ?? PROJECTS[0]}
             onBack={() => setView("projects")}
+            onOpenThread={(id) => { setView("chat"); setActiveThreadId(id) }}
           />
         ) : activeThreadId && messages.length === 0 && !isThinking ? (
           /* Selected an existing thread — show its transcript */
@@ -775,13 +776,23 @@ const PROJECT_DETAIL_TABS = [
   { value: "instructions", label: "Instructions" },
 ] as const
 
-const PROJECT_CHATS = [
-  { title: "Customer feedback from genie-paygo channel", time: "18 hours ago" },
-  { title: "Adoption trends across enterprise accounts", time: "yesterday" },
-  { title: "Draft the Q3 exec readout narrative", time: "3 days ago" },
-] as const
+// Thread ids each project owns (matches the panel's PANEL_PROJECTS mapping),
+// so the detail Chats list renders real threads that open their transcripts.
+const PROJECT_CHAT_IDS: Record<string, string[]> = {
+  p1: ["c4", "c5"],
+  p2: ["c2", "c3"],
+  p4: ["c7", "c8", "c9"],
+}
 
-function ProjectDetail({ project, onBack }: { project: Project; onBack: () => void }) {
+function ProjectDetail({
+  project,
+  onBack,
+  onOpenThread,
+}: {
+  project: Project
+  onBack: () => void
+  onOpenThread?: (id: string) => void
+}) {
   const [input, setInput] = React.useState("")
   const [tags, setTags] = React.useState<GenieTag[]>([])
   const [tab, setTab] = React.useState<string>("chats")
@@ -885,17 +896,33 @@ function ProjectDetail({ project, onBack }: { project: Project; onBack: () => vo
         {/* Tab content */}
         {tab === "chats" && (
           <div className="flex flex-col gap-0.5">
-            {PROJECT_CHATS.map((chat) => (
-              <button
-                key={chat.title}
-                type="button"
-                className="flex items-center gap-3 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
-              >
-                <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate text-sm text-foreground">{chat.title}</span>
-                <span className="shrink-0 text-hint text-muted-foreground">{chat.time}</span>
-              </button>
-            ))}
+            {(PROJECT_CHAT_IDS[project.id] ?? []).map((tid) => {
+              const thread = GENIE_THREADS[tid]
+              if (!thread) return null
+              return (
+                <button
+                  key={tid}
+                  type="button"
+                  onClick={() => onOpenThread?.(tid)}
+                  className="flex flex-col gap-0.5 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
+                >
+                  <div className="flex items-center gap-2">
+                    <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
+                    {thread.done && <CheckIcon size={12} className="shrink-0 text-[var(--success)]" />}
+                    <span className="flex-1 truncate text-sm text-foreground">{thread.title}</span>
+                    <span className="shrink-0 text-hint text-muted-foreground">{thread.time}</span>
+                  </div>
+                  {thread.preview && (
+                    <div className="flex items-center gap-1 pl-6">
+                      <span className="truncate text-hint text-muted-foreground">{thread.preview}</span>
+                      {thread.meta && (
+                        <span className="shrink-0 text-hint text-[var(--success)]">{thread.meta}</span>
+                      )}
+                    </div>
+                  )}
+                </button>
+              )
+            })}
           </div>
         )}
 

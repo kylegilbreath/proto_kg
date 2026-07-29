@@ -87,6 +87,9 @@ const PANEL_PROJECTS: PanelProject[] = [
   { id: "p4", name: "Q3 Reviews Analytics", threadIds: ["c7", "c8", "c9"] },
 ]
 
+// Threads owned by a project render only under Projects, not in the flat Chats list.
+const PROJECT_THREAD_IDS = new Set(PANEL_PROJECTS.flatMap((p) => p.threadIds))
+
 // ─── Exported lookups (so the page can render a selected thread) ────────────────
 
 export type GenieThread = Thread
@@ -115,10 +118,12 @@ function ThreadRow({
   thread,
   active,
   onClick,
+  className,
 }: {
   thread: Thread
   active: boolean
   onClick: () => void
+  className?: string
 }) {
   return (
     <button
@@ -127,6 +132,7 @@ function ThreadRow({
       className={cn(
         "flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left transition-colors",
         active ? "bg-primary/10" : "hover:bg-[var(--action-default-bg-hover)]",
+        className,
       )}
     >
       <div className="flex items-center gap-1.5">
@@ -302,19 +308,14 @@ export function GenieThreadsPanel({
                       project.threadIds.map((tid) => {
                         const thread = GENIE_THREADS[tid]
                         if (!thread) return null
-                        const active = activeThreadId === tid
                         return (
-                          <button
+                          <ThreadRow
                             key={tid}
-                            type="button"
+                            thread={thread}
+                            active={activeThreadId === tid}
                             onClick={() => onSelectThread?.(tid)}
-                            className={cn(
-                              "flex h-7 w-full items-center rounded py-1.5 pl-9 pr-2 text-left text-sm transition-colors",
-                              active ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-[var(--action-default-bg-hover)]",
-                            )}
-                          >
-                            <span className="truncate">{thread.title}</span>
-                          </button>
+                            className="pl-9"
+                          />
                         )
                       })}
                   </div>
@@ -324,13 +325,15 @@ export function GenieThreadsPanel({
         )}
 
         {GROUPS.map((group) => {
+          // Project-owned threads render only under Projects, never here.
+          const groupThreads = group.threads.filter((t) => !PROJECT_THREAD_IDS.has(t.id))
           const threads = search
-            ? group.threads.filter(
+            ? groupThreads.filter(
                 (t) =>
                   t.title.toLowerCase().includes(search.toLowerCase()) ||
                   t.preview.toLowerCase().includes(search.toLowerCase()),
               )
-            : group.threads
+            : groupThreads
           if (search && threads.length === 0) return null
           // Search forces groups open so results are always visible.
           const isCollapsed = !search && !!collapsed[group.label]
