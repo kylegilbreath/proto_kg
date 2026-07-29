@@ -176,6 +176,11 @@ type ChatMessage = {
 let msgCounter = 0
 const uid = () => `msg-${++msgCounter}`
 
+// A chat created during this session.
+type DynamicThread = { id: string; title: string; projectId?: string; projectName?: string }
+let threadCounter = 0
+const newThreadId = () => `t-${++threadCounter}`
+
 export default function GenieCodeProjects() {
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
   const [input, setInput] = React.useState("")
@@ -190,20 +195,37 @@ export default function GenieCodeProjects() {
   const [conversationProject, setConversationProject] = React.useState<{ id: string; name: string }>()
   // Project pre-selected in the new-chat composer (from a project's "New chat").
   const [newChatProject, setNewChatProject] = React.useState<string>()
+  // Threads created this session. Tagged with a projectId when started in/from a
+  // project so they show in that project (not Recents).
+  const [dynamicThreads, setDynamicThreads] = React.useState<DynamicThread[]>([])
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [messages, isThinking])
 
-  const send = (value: string) => {
+  // `project` is passed when the chat is started in/from a project.
+  const send = (value: string, project?: { id: string; name: string }) => {
     const text = value.trim()
     if (!text) return
+
+    // On the first message of a brand-new chat, mint a real thread so it shows
+    // up in the panel (in its project folder, or Recents if unscoped).
+    setActiveThreadId((id) => {
+      if (id) return id
+      const tid = newThreadId()
+      const title = text.length > 44 ? `${text.slice(0, 44)}…` : text
+      setDynamicThreads((prev) => [
+        { id: tid, title, projectId: project?.id, projectName: project?.name },
+        ...prev,
+      ])
+      return tid
+    })
+
     setMessages((prev) => [...prev, { id: uid(), role: "user", content: text }])
     setInput("")
     setTags([])
     setIsThinking(true)
-    setActiveThreadId((id) => id ?? "c1")
     setTimeout(() => {
       setIsThinking(false)
       setAwaitingApproval(true)
@@ -252,7 +274,7 @@ export default function GenieCodeProjects() {
     setActiveThreadId(undefined)
     setConversationProject(project)
     setView("chat")
-    send(text)
+    send(text, project)
   }
 
   const isEmpty = messages.length === 0 && !isThinking
@@ -269,7 +291,18 @@ export default function GenieCodeProjects() {
         {/* Threads panel — inside the card */}
         <GenieThreadsPanel
           activeThreadId={view === "chat" ? activeThreadId : undefined}
-          onSelectThread={(id) => { setView("chat"); setActiveThreadId(id) }}
+          extraThreads={dynamicThreads}
+          onSelectThread={(id) => {
+            setView("chat")
+            setActiveThreadId(id)
+            setMessages([])
+            // Restore the breadcrumb project for this thread, if any.
+            const dyn = dynamicThreads.find((t) => t.id === id)
+            const proj = dyn?.projectId
+              ? { id: dyn.projectId, name: dyn.projectName ?? "" }
+              : threadProject(id)
+            setConversationProject(proj)
+          }}
           onNewChat={() => { setView("chat"); handleNewChat() }}
           onSelectAction={(id) => setView(id === "projects" ? "projects" : "chat")}
           activeAction={view === "projects" || view === "detail" ? "projects" : undefined}
@@ -285,7 +318,21 @@ export default function GenieCodeProjects() {
           <ProjectDetail
             project={PROJECTS.find((p) => p.id === selectedProjectId) ?? PROJECTS[0]}
             onBack={() => setView("projects")}
-            onOpenThread={(id) => { setView("chat"); setActiveThreadId(id) }}
+            extraThreads={dynamicThreads}
+            onOpenThread={(id) => {
+              const proj = PROJECTS.find((p) => p.id === selectedProjectId)
+              setView("chat")
+              setActiveThreadId(id)
+              setMessages([])
+              const dyn = dynamicThreads.find((t) => t.id === id)
+              setConversationProject(
+                dyn?.projectId
+                  ? { id: dyn.projectId, name: dyn.projectName ?? "" }
+                  : proj
+                    ? { id: proj.id, name: proj.name }
+                    : threadProject(id),
+              )
+            }}
             onStartChat={startProjectChat}
           />
         ) : activeThreadId && messages.length === 0 && !isThinking ? (
@@ -318,7 +365,20 @@ export default function GenieCodeProjects() {
           )}
           <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
             {isEmpty ? (
-              <EmptyState key={newChatProject ?? "none"} onPick={send} input={input} setInput={setInput} tags={tags} setTags={setTags} initialProject={newChatProject} />
+              <EmptyState
+                key={newChatProject ?? "none"}
+                onPick={(text, projectName) => {
+                  const proj = projectName ? PROJECTS.find((p) => p.name === projectName) : undefined
+                  const projRef = proj ? { id: proj.id, name: proj.name } : undefined
+                  setConversationProject(projRef)
+                  send(text, projRef)
+                }}
+                input={input}
+                setInput={setInput}
+                tags={tags}
+                setTags={setTags}
+                initialProject={newChatProject}
+              />
             ) : (
               <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5 px-6 py-6">
                 {messages.map((msg) =>
@@ -508,7 +568,7 @@ function EmptyState({
   setTags,
   initialProject,
 }: {
-  onPick: (v: string) => void
+  onPick: (v: string, projectName?: string) => void
   input: string
   setInput: (v: string) => void
   tags: GenieTag[]
@@ -534,7 +594,7 @@ function EmptyState({
               setInput={setInput}
               tags={tags}
               setTags={setTags}
-              onSubmit={onPick}
+              onSubmit={(text) => onPick(text, projectName)}
               className="w-full"
               showProject
               projectName={projectName}
@@ -572,7 +632,7 @@ function EmptyState({
               <button
                 key={cat.id}
                 type="button"
-                onClick={() => (expandable ? setOpenCat(active ? undefined : cat.id) : onPick(cat.label))}
+                onClick={() => (expandable ? setOpenCat(active ? undefined : cat.id) : onPick(cat.label, projectName))}
                 className={cn(
                   "flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm transition-colors",
                   active
@@ -606,7 +666,7 @@ function EmptyState({
                     <button
                       key={p}
                       type="button"
-                      onClick={() => onPick(p)}
+                      onClick={() => onPick(p, projectName)}
                       className={cn(
                         "px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]",
                         i === 0 && "text-primary",
@@ -858,11 +918,13 @@ function ProjectDetail({
   onBack,
   onOpenThread,
   onStartChat,
+  extraThreads = [],
 }: {
   project: Project
   onBack: () => void
   onOpenThread?: (id: string) => void
   onStartChat?: (project: { id: string; name: string }, text: string) => void
+  extraThreads?: DynamicThread[]
 }) {
   const [input, setInput] = React.useState("")
   const [tags, setTags] = React.useState<GenieTag[]>([])
@@ -966,6 +1028,21 @@ function ProjectDetail({
         {/* Tab content */}
         {tab === "chats" && (
           <div className="flex flex-col gap-0.5">
+            {/* Session-created chats in this project, newest first */}
+            {extraThreads
+              .filter((t) => t.projectId === project.id)
+              .map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => onOpenThread?.(t.id)}
+                  className="flex items-center gap-2 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
+                >
+                  <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate text-sm text-foreground">{t.title}</span>
+                  <span className="shrink-0 text-hint text-muted-foreground">now</span>
+                </button>
+              ))}
             {(PROJECT_CHAT_IDS[project.id] ?? []).map((tid) => {
               const thread = GENIE_THREADS[tid]
               if (!thread) return null
@@ -1349,7 +1426,7 @@ function InstructionsDoc() {
     <div className="rounded-md border border-border">
       {/* Header: filename + edit/save/cancel */}
       <div className="flex items-center gap-2 border-b border-border bg-secondary px-4 py-2">
-        <span className="flex-1 font-mono text-sm text-foreground">.assistant_instructions.md</span>
+        <span className="flex-1 text-sm font-semibold text-foreground">Project instructions</span>
         {editing ? (
           <>
             <Button variant="default" size="sm" onClick={() => { setDraft(INSTRUCTIONS_MARKDOWN); setEditing(false) }}>

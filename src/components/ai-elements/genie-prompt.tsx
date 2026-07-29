@@ -278,16 +278,22 @@ export function GeniePrompt({
     </button>
   );
 
+  const hasProject = typeof projectLabel === "string";
   const projectButton = (
     <button
       type="button"
       onClick={onChooseProject}
       // Padded ghost button, matching the workspace selector in the top nav.
-      className="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]"
+      // Unset: muted (gray) folder + "Add to project" label. Set: colored
+      // folder + the project name in foreground.
+      className="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-sm transition-colors hover:bg-[var(--action-default-bg-hover)]"
     >
-      <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
-      <span className="whitespace-nowrap">
-        {typeof projectLabel === "string" ? projectLabel : "Choose project"}
+      <FolderIcon
+        size={16}
+        className={cn("shrink-0", hasProject ? "text-[var(--warning)]" : "text-muted-foreground")}
+      />
+      <span className={cn("whitespace-nowrap", hasProject ? "text-foreground" : "text-muted-foreground")}>
+        {hasProject ? projectLabel : "Add to project"}
       </span>
       <ChevronDownIcon size={16} className="shrink-0 text-muted-foreground" />
     </button>

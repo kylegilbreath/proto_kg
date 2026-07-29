@@ -166,8 +166,13 @@ function ThreadRow({
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
 
+/** A chat created during the session, to merge into the panel. */
+export type ExtraThread = { id: string; title: string; projectId?: string }
+
 interface GenieThreadsPanelProps {
   activeThreadId?: string
+  /** Session-created chats: project-tagged ones show in their folder, else Recents. */
+  extraThreads?: ExtraThread[]
   onSelectThread?: (id: string) => void
   onNewChat?: () => void
   /** Fired when an action row (schedules, customizations, projects, inbox) is clicked */
@@ -181,6 +186,7 @@ interface GenieThreadsPanelProps {
 
 export function GenieThreadsPanel({
   activeThreadId,
+  extraThreads = [],
   onSelectThread,
   onNewChat,
   onSelectAction,
@@ -291,27 +297,52 @@ export function GenieThreadsPanel({
                     )}
                   />
                 </button>
-                {expanded &&
-                  project.threadIds.map((tid) => {
-                    const thread = GENIE_THREADS[tid]
-                    if (!thread) return null
-                    return (
-                      <ThreadRow
-                        key={tid}
-                        thread={thread}
-                        active={activeThreadId === tid}
-                        onClick={() => onSelectThread?.(tid)}
-                        className="pl-9"
-                      />
-                    )
-                  })}
+                {expanded && (
+                  <>
+                    {/* Session-created chats in this project, newest first */}
+                    {extraThreads
+                      .filter((t) => t.projectId === project.id)
+                      .map((t) => (
+                        <ThreadRow
+                          key={t.id}
+                          thread={{ id: t.id, title: t.title, preview: "", time: "now" }}
+                          active={activeThreadId === t.id}
+                          onClick={() => onSelectThread?.(t.id)}
+                          className="pl-9"
+                        />
+                      ))}
+                    {project.threadIds.map((tid) => {
+                      const thread = GENIE_THREADS[tid]
+                      if (!thread) return null
+                      return (
+                        <ThreadRow
+                          key={tid}
+                          thread={thread}
+                          active={activeThreadId === tid}
+                          onClick={() => onSelectThread?.(tid)}
+                          className="pl-9"
+                        />
+                      )
+                    })}
+                  </>
+                )}
               </div>
             )
           })}
 
         {GROUPS.map((group) => {
           // Project-owned threads render only under Projects, never here.
-          const groupThreads = group.threads.filter((t) => !PROJECT_THREAD_IDS.has(t.id))
+          // Untagged session chats show at the top of Recents.
+          const recentsExtras: Thread[] =
+            group.label === "Recents"
+              ? extraThreads
+                  .filter((t) => !t.projectId)
+                  .map((t) => ({ id: t.id, title: t.title, preview: "", time: "now" }))
+              : []
+          const groupThreads = [
+            ...recentsExtras,
+            ...group.threads.filter((t) => !PROJECT_THREAD_IDS.has(t.id)),
+          ]
           const threads = search
             ? groupThreads.filter(
                 (t) =>
