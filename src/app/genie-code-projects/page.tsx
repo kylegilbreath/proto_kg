@@ -188,6 +188,8 @@ export default function GenieCodeProjects() {
   const [selectedProjectId, setSelectedProjectId] = React.useState<string>()
   // Project a freshly-started conversation belongs to (for the thread breadcrumb).
   const [conversationProject, setConversationProject] = React.useState<{ id: string; name: string }>()
+  // Project pre-selected in the new-chat composer (from a project's "New chat").
+  const [newChatProject, setNewChatProject] = React.useState<string>()
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -234,6 +236,14 @@ export default function GenieCodeProjects() {
     setAwaitingApproval(false)
     setActiveThreadId(undefined)
     setConversationProject(undefined)
+    setNewChatProject(undefined)
+  }
+
+  // "New chat" on a project card → new-chat page with that project pre-selected.
+  const newChatInProject = (projectName: string) => {
+    handleNewChat()
+    setNewChatProject(projectName)
+    setView("chat")
   }
 
   // Submitting from a project's detail page starts a new thread in that project.
@@ -269,6 +279,7 @@ export default function GenieCodeProjects() {
         {view === "projects" ? (
           <ProjectsView
             onOpenProject={(id) => { setSelectedProjectId(id); setView("detail") }}
+            onNewChat={newChatInProject}
           />
         ) : view === "detail" ? (
           <ProjectDetail
@@ -307,7 +318,7 @@ export default function GenieCodeProjects() {
           )}
           <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
             {isEmpty ? (
-              <EmptyState onPick={send} input={input} setInput={setInput} tags={tags} setTags={setTags} />
+              <EmptyState key={newChatProject ?? "none"} onPick={send} input={input} setInput={setInput} tags={tags} setTags={setTags} initialProject={newChatProject} />
             ) : (
               <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5 px-6 py-6">
                 {messages.map((msg) =>
@@ -495,15 +506,18 @@ function EmptyState({
   setInput,
   tags,
   setTags,
+  initialProject,
 }: {
   onPick: (v: string) => void
   input: string
   setInput: (v: string) => void
   tags: GenieTag[]
   setTags: React.Dispatch<React.SetStateAction<GenieTag[]>>
+  /** Project pre-selected in the composer (e.g. from a project's "New chat") */
+  initialProject?: string
 }) {
   const [openCat, setOpenCat] = React.useState<string>()
-  const [projectName, setProjectName] = React.useState<string>()
+  const [projectName, setProjectName] = React.useState<string | undefined>(initialProject)
   const [projectPopoverOpen, setProjectPopoverOpen] = React.useState(false)
 
   return (
@@ -707,7 +721,15 @@ const PROJECT_TABS = [
   { value: "shared", label: "Shared with you" },
 ] as const
 
-function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
+function ProjectCard({
+  project,
+  onOpen,
+  onNewChat,
+}: {
+  project: Project
+  onOpen: () => void
+  onNewChat: () => void
+}) {
   return (
     <div
       role="button"
@@ -733,7 +755,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
               variant="ghost"
               size="icon-xs"
               aria-label="New chat"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onNewChat() }}
             >
               <NewChatIcon size={16} className="text-muted-foreground" />
             </Button>
@@ -745,7 +767,13 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
   )
 }
 
-function ProjectsView({ onOpenProject }: { onOpenProject: (id: string) => void }) {
+function ProjectsView({
+  onOpenProject,
+  onNewChat,
+}: {
+  onOpenProject: (id: string) => void
+  onNewChat: (projectName: string) => void
+}) {
   const [tab, setTab] = React.useState<string>("yours")
   const [search, setSearch] = React.useState("")
 
@@ -795,7 +823,12 @@ function ProjectsView({ onOpenProject }: { onOpenProject: (id: string) => void }
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {projects.map((project) => (
-              <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project.id)} />
+              <ProjectCard
+                key={project.id}
+                project={project}
+                onOpen={() => onOpenProject(project.id)}
+                onNewChat={() => onNewChat(project.name)}
+              />
             ))}
           </div>
         )}
