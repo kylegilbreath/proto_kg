@@ -10,7 +10,7 @@
 
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { AppShell, GenieThreadsPanel, GENIE_THREADS, threadAssetCount } from "@/components/shell"
+import { AppShell, GenieThreadsPanel, GENIE_THREADS, threadAssetCount, threadProject } from "@/components/shell"
 import { Button } from "@/components/ui/button"
 import { DbIcon } from "@/components/ui/db-icon"
 import { Input } from "@/components/ui/input"
@@ -262,6 +262,7 @@ export default function GenieCodeProjects() {
             tags={tags}
             setTags={setTags}
             onSubmit={send}
+            onOpenProject={(id) => { setSelectedProjectId(id); setView("detail") }}
           />
         ) : (
         /* Chat column — new chat / live conversation */
@@ -363,6 +364,7 @@ function ThreadView({
   tags,
   setTags,
   onSubmit,
+  onOpenProject,
 }: {
   threadId: string
   input: string
@@ -370,15 +372,29 @@ function ThreadView({
   tags: GenieTag[]
   setTags: React.Dispatch<React.SetStateAction<GenieTag[]>>
   onSubmit: (v: string) => void
+  onOpenProject?: (id: string) => void
 }) {
   const thread = GENIE_THREADS[threadId]
   const turns = THREAD_TRANSCRIPTS[threadId] ?? GENERIC_TRANSCRIPT
   const assetCount = threadAssetCount(thread)
+  const project = threadProject(threadId)
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Thread title */}
-      <div className="flex h-12 shrink-0 items-center border-b border-border px-6">
+      {/* Thread title — "Project / Thread" when the thread lives in a project */}
+      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border px-6">
+        {project && (
+          <>
+            <button
+              type="button"
+              onClick={() => onOpenProject?.(project.id)}
+              className="max-w-[240px] truncate text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {project.name}
+            </button>
+            <span className="text-muted-foreground/50" aria-hidden>/</span>
+          </>
+        )}
         <span className="truncate text-sm font-semibold text-foreground">
           {thread?.title ?? "Untitled chat"}
         </span>

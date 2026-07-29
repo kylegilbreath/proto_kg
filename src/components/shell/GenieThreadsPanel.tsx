@@ -77,12 +77,14 @@ const GROUPS: ThreadGroup[] = [
 ]
 
 // Two-tier Projects section: each project expands to the threads it owns.
+// `id` matches the project ids used on the Projects page so a thread can link
+// back to its project detail view.
 type PanelProject = { id: string; name: string; threadIds: string[] }
 
 const PANEL_PROJECTS: PanelProject[] = [
-  { id: "pr1", name: "Lakeflow Designer Adoption", threadIds: ["c4", "c5"] },
-  { id: "pr2", name: "Customer Support Agent Reboot", threadIds: ["c2", "c3"] },
-  { id: "pr3", name: "Q3 Reviews Analytics", threadIds: ["c7", "c8", "c9"] },
+  { id: "p1", name: "Lakeflow Designer Adoption", threadIds: ["c4", "c5"] },
+  { id: "p2", name: "Customer Support Agent Reboot", threadIds: ["c2", "c3"] },
+  { id: "p4", name: "Q3 Reviews Analytics", threadIds: ["c7", "c8", "c9"] },
 ]
 
 // ─── Exported lookups (so the page can render a selected thread) ────────────────
@@ -99,6 +101,12 @@ export function threadAssetCount(thread: GenieThread | undefined): number {
   if (!thread?.meta) return 0
   const m = thread.meta.match(/(\d+)\s+assets?/)
   return m ? Number(m[1]) : 0
+}
+
+/** The project a thread belongs to (id matches the Projects page), or undefined. */
+export function threadProject(threadId: string): { id: string; name: string } | undefined {
+  const p = PANEL_PROJECTS.find((proj) => proj.threadIds.includes(threadId))
+  return p ? { id: p.id, name: p.name } : undefined
 }
 
 // ─── Thread row ───────────────────────────────────────────────────────────────
