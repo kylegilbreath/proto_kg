@@ -186,6 +186,8 @@ export default function GenieCodeProjects() {
   const [canvasOpen, setCanvasOpen] = React.useState(false)
   const [view, setView] = React.useState<"chat" | "projects" | "detail">("chat")
   const [selectedProjectId, setSelectedProjectId] = React.useState<string>()
+  // Project a freshly-started conversation belongs to (for the thread breadcrumb).
+  const [conversationProject, setConversationProject] = React.useState<{ id: string; name: string }>()
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -231,6 +233,16 @@ export default function GenieCodeProjects() {
     setIsThinking(false)
     setAwaitingApproval(false)
     setActiveThreadId(undefined)
+    setConversationProject(undefined)
+  }
+
+  // Submitting from a project's detail page starts a new thread in that project.
+  const startProjectChat = (project: { id: string; name: string }, text: string) => {
+    setMessages([])
+    setActiveThreadId(undefined)
+    setConversationProject(project)
+    setView("chat")
+    send(text)
   }
 
   const isEmpty = messages.length === 0 && !isThinking
@@ -263,6 +275,7 @@ export default function GenieCodeProjects() {
             project={PROJECTS.find((p) => p.id === selectedProjectId) ?? PROJECTS[0]}
             onBack={() => setView("projects")}
             onOpenThread={(id) => { setView("chat"); setActiveThreadId(id) }}
+            onStartChat={startProjectChat}
           />
         ) : activeThreadId && messages.length === 0 && !isThinking ? (
           /* Selected an existing thread — show its transcript */
@@ -278,6 +291,20 @@ export default function GenieCodeProjects() {
         ) : (
         /* Chat column — new chat / live conversation */
         <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Breadcrumb header when this conversation belongs to a project */}
+          {!isEmpty && conversationProject && (
+            <div className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border px-6">
+              <button
+                type="button"
+                onClick={() => { setSelectedProjectId(conversationProject.id); setView("detail") }}
+                className="max-w-[240px] truncate text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {conversationProject.name}
+              </button>
+              <span className="text-muted-foreground/50" aria-hidden>/</span>
+              <span className="truncate text-sm font-semibold text-foreground">New chat</span>
+            </div>
+          )}
           <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
             {isEmpty ? (
               <EmptyState onPick={send} input={input} setInput={setInput} tags={tags} setTags={setTags} />
@@ -798,10 +825,12 @@ function ProjectDetail({
   project,
   onBack,
   onOpenThread,
+  onStartChat,
 }: {
   project: Project
   onBack: () => void
   onOpenThread?: (id: string) => void
+  onStartChat?: (project: { id: string; name: string }, text: string) => void
 }) {
   const [input, setInput] = React.useState("")
   const [tags, setTags] = React.useState<GenieTag[]>([])
@@ -847,16 +876,14 @@ function ProjectDetail({
           </div>
         </div>
 
-        {/* Composer */}
-        <GeniePrompt
-          variant="chat"
-          value={input}
-          onChange={setInput}
-          onSubmit={() => setInput("")}
+        {/* Composer — same pattern as new chat (+ / @, Auto tier), no project
+            switcher since submitting here starts a chat in this project. */}
+        <Composer
+          input={input}
+          setInput={setInput}
           tags={tags}
-          onTagRemove={(id) => setTags((prev) => prev.filter((t) => t.id !== id))}
-          placeholder="How can I help you today?"
-          modelName="Sonnet 5"
+          setTags={setTags}
+          onSubmit={(text) => onStartChat?.({ id: project.id, name: project.name }, text)}
         />
 
         {/* Tabs + search + sort */}
