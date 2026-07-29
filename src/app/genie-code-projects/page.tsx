@@ -177,7 +177,7 @@ let msgCounter = 0
 const uid = () => `msg-${++msgCounter}`
 
 // A chat created during this session.
-type DynamicThread = { id: string; title: string; projectId?: string; projectName?: string }
+type DynamicThread = { id: string; title: string; preview: string; projectId?: string; projectName?: string }
 let threadCounter = 0
 const newThreadId = () => `t-${++threadCounter}`
 
@@ -210,17 +210,17 @@ export default function GenieCodeProjects() {
     if (!text) return
 
     // On the first message of a brand-new chat, mint a real thread so it shows
-    // up in the panel (in its project folder, or Recents if unscoped).
-    setActiveThreadId((id) => {
-      if (id) return id
+    // up in the panel (in its project folder, or Recents if unscoped). Done
+    // outside any state updater so it runs exactly once (Strict Mode safe).
+    if (!activeThreadId) {
       const tid = newThreadId()
       const title = text.length > 44 ? `${text.slice(0, 44)}…` : text
       setDynamicThreads((prev) => [
-        { id: tid, title, projectId: project?.id, projectName: project?.name },
+        { id: tid, title, preview: text, projectId: project?.id, projectName: project?.name },
         ...prev,
       ])
-      return tid
-    })
+      setActiveThreadId(tid)
+    }
 
     setMessages((prev) => [...prev, { id: uid(), role: "user", content: text }])
     setInput("")
@@ -604,21 +604,37 @@ function EmptyState({
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[280px] p-1">
           <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
-          {PROJECTS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => { setProjectName(p.name); setProjectPopoverOpen(false) }}
-              className={cn(
-                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
-                projectName === p.name ? "text-primary" : "text-foreground",
-              )}
-            >
-              <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
-              <span className="flex-1 truncate">{p.name}</span>
-              {projectName === p.name && <CheckIcon size={14} className="shrink-0 text-primary" />}
-            </button>
-          ))}
+          {PROJECTS.map((p) => {
+            const selected = projectName === p.name
+            return (
+              <div
+                key={p.id}
+                className={cn(
+                  "group/row flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors hover:bg-muted",
+                  selected ? "text-primary" : "text-foreground",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => { setProjectName(p.name); setProjectPopoverOpen(false) }}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+                  <span className="flex-1 truncate">{p.name}</span>
+                </button>
+                {selected ? (
+                  <button
+                    type="button"
+                    onClick={() => { setProjectName(undefined); setProjectPopoverOpen(false) }}
+                    className="shrink-0 text-hint text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    Remove
+                  </button>
+                ) : null}
+                {selected && <CheckIcon size={14} className="shrink-0 text-primary" />}
+              </div>
+            )
+          })}
         </PopoverContent>
       </Popover>
 
@@ -772,7 +788,6 @@ type Project = {
 const PROJECTS: Project[] = [
   { id: "p1", name: "Lakeflow Designer Adoption", desc: "Track how teams adopt Lakeflow Designer across the org. Feeds the Q3 exec review.", time: "2h ago", chats: 3, scope: "yours" },
   { id: "p2", name: "Customer Support Agent Reboot", desc: "Reboot the review-and-product-docs agent so it actually calls the right tool.", time: "yesterday", chats: 5, scope: "yours" },
-  { id: "p3", name: "Bronze → Silver Reviews Pipeline", desc: "Source → bronze → silver → gold. One project spanning every notebook in the flow.", time: "3d ago", chats: 4, scope: "shared" },
   { id: "p4", name: "Q3 Reviews Analytics", desc: "Quarterly deep-dive on review sentiment and product mentions.", time: "5d ago", chats: 3, scope: "shared" },
 ]
 
@@ -1055,7 +1070,6 @@ function ProjectDetail({
                 >
                   <div className="flex items-center gap-2">
                     <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
-                    {thread.done && <CheckIcon size={12} className="shrink-0 text-[var(--success)]" />}
                     <span className="flex-1 truncate text-sm text-foreground">{thread.title}</span>
                     <span className="shrink-0 text-hint text-muted-foreground">{thread.time}</span>
                   </div>

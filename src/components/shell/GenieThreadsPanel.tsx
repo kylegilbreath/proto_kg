@@ -13,7 +13,6 @@ import {
   CalendarClockIcon,
   SyncIcon,
   SearchIcon,
-  CheckIcon,
   ChevronRightIcon,
   FolderIcon,
 } from "@/components/icons"
@@ -136,9 +135,6 @@ function ThreadRow({
       )}
     >
       <div className="flex items-center gap-1.5">
-        {thread.done && (
-          <CheckIcon size={12} className="shrink-0 text-[var(--success)]" />
-        )}
         <span className={cn("flex-1 truncate text-sm", active ? "text-primary font-semibold" : "text-foreground")}>
           {thread.title}
         </span>
@@ -167,7 +163,7 @@ function ThreadRow({
 // ─── Panel ────────────────────────────────────────────────────────────────────
 
 /** A chat created during the session, to merge into the panel. */
-export type ExtraThread = { id: string; title: string; projectId?: string }
+export type ExtraThread = { id: string; title: string; preview?: string; projectId?: string }
 
 interface GenieThreadsPanelProps {
   activeThreadId?: string
@@ -279,7 +275,10 @@ export function GenieThreadsPanel({
             matching the Scheduled / Recents section headers below) */}
         {!search &&
           PANEL_PROJECTS.map((project) => {
-            const expanded = !!openProjects[project.id]
+            const hasExtras = extraThreads.some((t) => t.projectId === project.id)
+            // Auto-expand a project when a new chat lands in it (unless the user
+            // has explicitly collapsed it).
+            const expanded = openProjects[project.id] ?? hasExtras
             return (
               <div key={project.id} className="flex flex-col gap-0.5">
                 <button
@@ -305,7 +304,7 @@ export function GenieThreadsPanel({
                       .map((t) => (
                         <ThreadRow
                           key={t.id}
-                          thread={{ id: t.id, title: t.title, preview: "", time: "now" }}
+                          thread={{ id: t.id, title: t.title, preview: t.preview ?? "", time: "now" }}
                           active={activeThreadId === t.id}
                           onClick={() => onSelectThread?.(t.id)}
                           className="pl-9"
@@ -337,7 +336,7 @@ export function GenieThreadsPanel({
             group.label === "Recents"
               ? extraThreads
                   .filter((t) => !t.projectId)
-                  .map((t) => ({ id: t.id, title: t.title, preview: "", time: "now" }))
+                  .map((t) => ({ id: t.id, title: t.title, preview: t.preview ?? "", time: "now" }))
               : []
           const groupThreads = [
             ...recentsExtras,
