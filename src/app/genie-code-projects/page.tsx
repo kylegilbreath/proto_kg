@@ -84,6 +84,7 @@ import {
   CatalogIcon,
   TableIcon,
   UploadIcon,
+  RefreshIcon,
 } from "@/components/icons"
 import { ThumbsUpIcon, ThumbsDownIcon, CopyIcon } from "lucide-react"
 
@@ -809,6 +810,7 @@ function ProjectDetail({
   const [search, setSearch] = React.useState("")
   const [sort, setSort] = React.useState("recent")
   const [addAssetOpen, setAddAssetOpen] = React.useState(false)
+  const [ucOpen, setUcOpen] = React.useState(false)
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto px-8 py-6">
@@ -955,7 +957,7 @@ function ProjectDetail({
                     <FolderOpenIcon size={16} className="text-muted-foreground" />
                     From workspace
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setUcOpen(true)}>
                     <CatalogIcon size={16} className="text-muted-foreground" />
                     From Unity Catalog
                   </DropdownMenuItem>
@@ -1029,6 +1031,7 @@ function ProjectDetail({
       </div>
 
       <AddAssetDialog open={addAssetOpen} onOpenChange={setAddAssetOpen} />
+      <UnityCatalogDialog open={ucOpen} onOpenChange={setUcOpen} />
     </div>
   )
 }
@@ -1155,6 +1158,102 @@ function AddAssetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
                 <WorkspaceRow key={node.id} node={node} depth={0} />
               ))}
             </div>
+          </div>
+        </DialogBody>
+        <DialogFooter className="items-center">
+          <span className="mr-auto text-hint text-muted-foreground">Nothing selected</span>
+          <Button variant="default" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button size="sm" disabled>Add</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+const UC_TABLES = [
+  "all_matches",
+  "amazon_books_data",
+  "amazon_books_data_drift_metrics",
+  "amazon_books_data_profile_metrics",
+  "amazon_books_ratings",
+  "asian_countries",
+  "autocomplete_improvements_demo",
+]
+
+function UnityCatalogDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const [search, setSearch] = React.useState("")
+  const [scope, setScope] = React.useState("all")
+  const tables = search
+    ? UC_TABLES.filter((t) => t.toLowerCase().includes(search.toLowerCase()))
+    : UC_TABLES
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>Add from Unity Catalog</DialogTitle>
+          <DialogDescription>
+            Browse catalogs, schemas, and tables — pin what this project should reference.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-3">
+          {/* Search + filter + refresh */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <SearchIcon
+                size={16}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search"
+                className="h-8 pl-8"
+              />
+            </div>
+            <Button variant="default" size="icon-sm" aria-label="Filter">
+              <SlidersIcon size={16} className="text-muted-foreground" />
+            </Button>
+            <Button variant="ghost" size="icon-sm" aria-label="Refresh">
+              <RefreshIcon size={16} className="text-muted-foreground" />
+            </Button>
+          </div>
+
+          {/* For you / All */}
+          <SegmentedControl value={scope} onValueChange={setScope}>
+            <SegmentedItem value="foryou">For you</SegmentedItem>
+            <SegmentedItem value="all">All</SegmentedItem>
+          </SegmentedControl>
+
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-1.5 text-sm">
+            <button type="button" className="text-primary hover:underline">All catalogs</button>
+            <ChevronRightIcon size={14} className="text-muted-foreground" />
+            <button type="button" className="text-primary hover:underline">main</button>
+            <ChevronRightIcon size={14} className="text-muted-foreground" />
+            <span className="text-foreground">jason_messer</span>
+            <div className="flex-1" />
+            <Button variant="ghost" size="icon-xs" aria-label="Add here">
+              <PlusIcon size={16} className="text-muted-foreground" />
+            </Button>
+          </div>
+
+          {/* Table list */}
+          <div className="max-h-[280px] overflow-y-auto">
+            {tables.length === 0 ? (
+              <p className="px-2 py-6 text-center text-hint text-muted-foreground">No matches.</p>
+            ) : (
+              tables.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-muted"
+                >
+                  <TableIcon size={16} className="shrink-0 text-primary" />
+                  <span className="truncate text-sm text-foreground">{t}</span>
+                </button>
+              ))
+            )}
           </div>
         </DialogBody>
         <DialogFooter className="items-center">
