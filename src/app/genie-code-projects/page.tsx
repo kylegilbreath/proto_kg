@@ -14,6 +14,8 @@ import { AppShell, GenieThreadsPanel, GENIE_THREADS, threadAssetCount, threadPro
 import { Button } from "@/components/ui/button"
 import { DbIcon } from "@/components/ui/db-icon"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { SegmentedControl, SegmentedItem } from "@/components/ui/segmented-control"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import {
@@ -85,6 +87,7 @@ import {
   TableIcon,
   UploadIcon,
   RefreshIcon,
+  WrenchSparkleIcon,
 } from "@/components/icons"
 import { ThumbsUpIcon, ThumbsDownIcon, CopyIcon } from "lucide-react"
 
@@ -180,6 +183,8 @@ const uid = () => `msg-${++msgCounter}`
 type DynamicThread = { id: string; title: string; preview: string; projectId?: string; projectName?: string }
 let threadCounter = 0
 const newThreadId = () => `t-${++threadCounter}`
+let projectCounter = 0
+const newProjectId = () => `p-new-${++projectCounter}`
 
 export default function GenieCodeProjects() {
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
@@ -189,8 +194,14 @@ export default function GenieCodeProjects() {
   const [activeThreadId, setActiveThreadId] = React.useState<string>()
   const [awaitingApproval, setAwaitingApproval] = React.useState(false)
   const [canvasOpen, setCanvasOpen] = React.useState(false)
-  const [view, setView] = React.useState<"chat" | "projects" | "detail">("chat")
+  const [view, setView] = React.useState<"chat" | "projects" | "create-project" | "detail">("chat")
   const [selectedProjectId, setSelectedProjectId] = React.useState<string>()
+  const [projects, setProjects] = React.useState<Project[]>(PROJECTS)
+  // Runtime chat → project assignments (for side-panel chats moved into a project).
+  // `null` means explicitly removed from any project (overrides the static map).
+  const [threadAssignments, setThreadAssignments] = React.useState<
+    Record<string, { id: string; name: string } | null>
+  >({})
   // Project a freshly-started conversation belongs to (for the thread breadcrumb).
   const [conversationProject, setConversationProject] = React.useState<{ id: string; name: string }>()
   // Project pre-selected in the new-chat composer (from a project's "New chat").
@@ -277,6 +288,50 @@ export default function GenieCodeProjects() {
     send(text, project)
   }
 
+  const createProject = (draft: { name: string; desc: string; assets: string[] }) => {
+    const project: Project = {
+      id: newProjectId(),
+      name: draft.name,
+      desc: draft.desc || "No description yet.",
+      time: "now",
+      chats: 0,
+      scope: "yours",
+      assets: draft.assets,
+    }
+    setProjects((current) => [project, ...current])
+    setSelectedProjectId(project.id)
+    setView("detail")
+  }
+
+  const assignThreadToProject = (
+    threadId: string,
+    project: { id: string; name: string } | undefined,
+  ) => {
+    setThreadAssignments((current) => ({
+      ...current,
+      [threadId]: project ?? null,
+    }))
+    setDynamicThreads((current) =>
+      current.map((t) =>
+        t.id === threadId
+          ? { ...t, projectId: project?.id, projectName: project?.name }
+          : t,
+      ),
+    )
+    if (activeThreadId === threadId || !activeThreadId) {
+      setConversationProject(project)
+    }
+  }
+
+  const resolveThreadProject = (threadId: string): { id: string; name: string } | undefined => {
+    if (Object.prototype.hasOwnProperty.call(threadAssignments, threadId)) {
+      return threadAssignments[threadId] ?? undefined
+    }
+    const dyn = dynamicThreads.find((t) => t.id === threadId)
+    if (dyn?.projectId) return { id: dyn.projectId, name: dyn.projectName ?? "" }
+    return threadProject(threadId)
+  }
+
   const isEmpty = messages.length === 0 && !isThinking
 
   return (
@@ -292,46 +347,49 @@ export default function GenieCodeProjects() {
         <GenieThreadsPanel
           activeThreadId={view === "chat" ? activeThreadId : undefined}
           extraThreads={dynamicThreads}
+          extraProjects={projects.map(({ id, name }) => ({ id, name }))}
+          threadAssignments={threadAssignments}
           onSelectThread={(id) => {
             setView("chat")
             setActiveThreadId(id)
             setMessages([])
-            // Restore the breadcrumb project for this thread, if any.
-            const dyn = dynamicThreads.find((t) => t.id === id)
-            const proj = dyn?.projectId
-              ? { id: dyn.projectId, name: dyn.projectName ?? "" }
-              : threadProject(id)
-            setConversationProject(proj)
+            setConversationProject(resolveThreadProject(id))
           }}
           onNewChat={() => { setView("chat"); handleNewChat() }}
           onSelectAction={(id) => setView(id === "projects" ? "projects" : "chat")}
-          activeAction={view === "projects" || view === "detail" ? "projects" : undefined}
+          onOpenProject={(id) => { setSelectedProjectId(id); setView("detail") }}
+          onCreateProject={() => setView("create-project")}
+          onNewChatInProject={(project) => newChatInProject(project.name)}
+          activeAction={view === "projects" || view === "create-project" ? "projects" : undefined}
+          activeProjectId={view === "detail" ? selectedProjectId : undefined}
           activeStatus={awaitingApproval ? "Waiting for your approval" : undefined}
         />
 
         {view === "projects" ? (
           <ProjectsView
+            projects={projects}
             onOpenProject={(id) => { setSelectedProjectId(id); setView("detail") }}
             onNewChat={newChatInProject}
+            onCreateProject={() => setView("create-project")}
+          />
+        ) : view === "create-project" ? (
+          <CreateProjectView
+            onCancel={() => setView("projects")}
+            onCreate={createProject}
           />
         ) : view === "detail" ? (
           <ProjectDetail
-            project={PROJECTS.find((p) => p.id === selectedProjectId) ?? PROJECTS[0]}
+            project={projects.find((p) => p.id === selectedProjectId) ?? projects[0]}
             onBack={() => setView("projects")}
             extraThreads={dynamicThreads}
+            assignedThreadIds={Object.entries(threadAssignments)
+              .filter(([, proj]) => proj?.id === selectedProjectId)
+              .map(([id]) => id)}
             onOpenThread={(id) => {
-              const proj = PROJECTS.find((p) => p.id === selectedProjectId)
               setView("chat")
               setActiveThreadId(id)
               setMessages([])
-              const dyn = dynamicThreads.find((t) => t.id === id)
-              setConversationProject(
-                dyn?.projectId
-                  ? { id: dyn.projectId, name: dyn.projectName ?? "" }
-                  : proj
-                    ? { id: proj.id, name: proj.name }
-                    : threadProject(id),
-              )
+              setConversationProject(resolveThreadProject(id))
             }}
             onStartChat={startProjectChat}
           />
@@ -340,40 +398,72 @@ export default function GenieCodeProjects() {
           <ThreadView
             threadId={activeThreadId}
             dynamicThread={dynamicThreads.find((t) => t.id === activeThreadId)}
+            projects={projects}
+            assignedProject={resolveThreadProject(activeThreadId)}
             input={input}
             setInput={setInput}
             tags={tags}
             setTags={setTags}
             onSubmit={send}
             onOpenProject={(id) => { setSelectedProjectId(id); setView("detail") }}
+            onAssignProject={(project) => assignThreadToProject(activeThreadId, project)}
+            onCreateProject={() => setView("create-project")}
           />
         ) : (
         /* Chat column — new chat / live conversation */
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Breadcrumb header when this conversation belongs to a project */}
-          {!isEmpty && conversationProject && (
+          {/* Breadcrumb / add-to-project header once a conversation is underway */}
+          {!isEmpty && (
             <div className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border px-6">
-              <button
-                type="button"
-                onClick={() => { setSelectedProjectId(conversationProject.id); setView("detail") }}
-                className="max-w-[240px] truncate text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {conversationProject.name}
-              </button>
-              <span className="text-muted-foreground/50" aria-hidden>/</span>
-              <span className="truncate text-sm font-semibold text-foreground">New chat</span>
+              {conversationProject ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedProjectId(conversationProject.id); setView("detail") }}
+                    className="max-w-[240px] truncate text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {conversationProject.name}
+                  </button>
+                  <span className="text-muted-foreground/50" aria-hidden>/</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">New chat</span>
+                  <AssignToProjectMenu
+                    projects={projects}
+                    assigned={conversationProject}
+                    onAssign={(project) => {
+                      if (activeThreadId) assignThreadToProject(activeThreadId, project)
+                      else setConversationProject(project)
+                    }}
+                    onCreateProject={() => setView("create-project")}
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">New chat</span>
+                  <AssignToProjectMenu
+                    projects={projects}
+                    assigned={undefined}
+                    onAssign={(project) => {
+                      if (activeThreadId) assignThreadToProject(activeThreadId, project)
+                      else setConversationProject(project)
+                    }}
+                    onCreateProject={() => setView("create-project")}
+                  />
+                </>
+              )}
             </div>
           )}
           <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
             {isEmpty ? (
               <EmptyState
                 key={newChatProject ?? "none"}
+                projects={projects}
                 onPick={(text, projectName) => {
-                  const proj = projectName ? PROJECTS.find((p) => p.name === projectName) : undefined
+                  const proj = projectName ? projects.find((p) => p.name === projectName) : undefined
                   const projRef = proj ? { id: proj.id, name: proj.name } : undefined
                   setConversationProject(projRef)
                   send(text, projRef)
                 }}
+                onCreateProject={() => setView("create-project")}
                 input={input}
                 setInput={setInput}
                 tags={tags}
@@ -470,29 +560,34 @@ const GENERIC_TRANSCRIPT: ThreadTurn[] = [
 function ThreadView({
   threadId,
   dynamicThread,
+  projects,
+  assignedProject,
   input,
   setInput,
   tags,
   setTags,
   onSubmit,
   onOpenProject,
+  onAssignProject,
+  onCreateProject,
 }: {
   threadId: string
   dynamicThread?: DynamicThread
+  projects: Project[]
+  assignedProject?: { id: string; name: string }
   input: string
   setInput: (v: string) => void
   tags: GenieTag[]
   setTags: React.Dispatch<React.SetStateAction<GenieTag[]>>
   onSubmit: (v: string) => void
   onOpenProject?: (id: string) => void
+  onAssignProject?: (project: { id: string; name: string } | undefined) => void
+  onCreateProject?: () => void
 }) {
   const thread = GENIE_THREADS[threadId]
   const turns = THREAD_TRANSCRIPTS[threadId] ?? GENERIC_TRANSCRIPT
   const assetCount = threadAssetCount(thread)
-  // Resolve the owning project from the static map or the dynamic (session) thread.
-  const project =
-    threadProject(threadId) ??
-    (dynamicThread?.projectId ? { id: dynamicThread.projectId, name: dynamicThread.projectName ?? "" } : undefined)
+  const project = assignedProject
   const title = thread?.title ?? dynamicThread?.title ?? "Untitled chat"
 
   return (
@@ -511,7 +606,13 @@ function ThreadView({
             <span className="text-muted-foreground/50" aria-hidden>/</span>
           </>
         )}
-        <span className="truncate text-sm font-semibold text-foreground">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{title}</span>
+        <AssignToProjectMenu
+          projects={projects}
+          assigned={project}
+          onAssign={(p) => onAssignProject?.(p)}
+          onCreateProject={onCreateProject}
+        />
       </div>
 
       {/* Transcript */}
@@ -563,17 +664,108 @@ function ThreadView({
   )
 }
 
+function AssignToProjectMenu({
+  projects,
+  assigned,
+  onAssign,
+  onCreateProject,
+}: {
+  projects: Project[]
+  assigned?: { id: string; name: string }
+  onAssign: (project: { id: string; name: string } | undefined) => void
+  onCreateProject?: () => void
+}) {
+  const [open, setOpen] = React.useState(false)
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            "shrink-0 gap-1",
+            assigned ? "text-muted-foreground" : "text-foreground",
+          )}
+        >
+          <FolderIcon size={16} className="text-[var(--warning)]" />
+          {assigned ? "Move project" : "Add to project"}
+          <ChevronDownIcon size={14} className="text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[280px] p-1">
+        <p className="px-2 py-1.5 text-hint text-muted-foreground">
+          {assigned ? "Move to project" : "Add to project"}
+        </p>
+        {projects.map((p) => {
+          const selected = assigned?.id === p.id
+          return (
+            <div
+              key={p.id}
+              className={cn(
+                "group/row flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors hover:bg-muted",
+                selected ? "text-primary" : "text-foreground",
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  onAssign({ id: p.id, name: p.name })
+                  setOpen(false)
+                }}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+                <span className="flex-1 truncate">{p.name}</span>
+              </button>
+              {selected ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAssign(undefined)
+                    setOpen(false)
+                  }}
+                  className="shrink-0 text-hint text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  Remove
+                </button>
+              ) : null}
+              {selected && <CheckIcon size={14} className="shrink-0 text-primary" />}
+            </div>
+          )
+        })}
+        <div className="my-1 border-t border-border" />
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false)
+            onCreateProject?.()
+          }}
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+        >
+          <PlusIcon size={16} className="shrink-0 text-muted-foreground" />
+          <span>Create new project</span>
+        </button>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 // ─── Empty state ─────────────────────────────────────────────────────────────────
 
 function EmptyState({
+  projects,
   onPick,
+  onCreateProject,
   input,
   setInput,
   tags,
   setTags,
   initialProject,
 }: {
+  projects: Project[]
   onPick: (v: string, projectName?: string) => void
+  onCreateProject?: () => void
   input: string
   setInput: (v: string) => void
   tags: GenieTag[]
@@ -609,7 +801,7 @@ function EmptyState({
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[280px] p-1">
           <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
-          {PROJECTS.map((p) => {
+          {projects.map((p) => {
             const selected = projectName === p.name
             return (
               <div
@@ -640,6 +832,18 @@ function EmptyState({
               </div>
             )
           })}
+          <div className="my-1 border-t border-border" />
+          <button
+            type="button"
+            onClick={() => {
+              setProjectPopoverOpen(false)
+              onCreateProject?.()
+            }}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+          >
+            <PlusIcon size={16} className="shrink-0 text-muted-foreground" />
+            <span>Create new project</span>
+          </button>
         </PopoverContent>
       </Popover>
 
@@ -788,6 +992,7 @@ type Project = {
   time: string
   chats: number
   scope: "yours" | "shared"
+  assets?: string[]
 }
 
 const PROJECTS: Project[] = [
@@ -848,16 +1053,20 @@ function ProjectCard({
 }
 
 function ProjectsView({
+  projects: allProjects,
   onOpenProject,
   onNewChat,
+  onCreateProject,
 }: {
+  projects: Project[]
   onOpenProject: (id: string) => void
   onNewChat: (projectName: string) => void
+  onCreateProject: () => void
 }) {
   const [tab, setTab] = React.useState<string>("yours")
   const [search, setSearch] = React.useState("")
 
-  const projects = PROJECTS.filter(
+  const projects = allProjects.filter(
     (p) => p.scope === tab && (!search || p.name.toLowerCase().includes(search.toLowerCase())),
   )
 
@@ -867,7 +1076,7 @@ function ProjectsView({
         {/* Header */}
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-[22px] font-semibold leading-7 text-foreground">Projects</h2>
-          <Button size="sm" className="shrink-0 gap-1">
+          <Button size="sm" className="shrink-0 gap-1" onClick={onCreateProject}>
             <PlusIcon size={16} />
             New project
           </Button>
@@ -917,11 +1126,350 @@ function ProjectsView({
   )
 }
 
+// ─── Create project ─────────────────────────────────────────────────────────────
+
+type CreateWsNode = {
+  id: string
+  name: string
+  kind: "folder" | "notebook" | "dashboard" | "file"
+  count?: number
+  defaultOpen?: boolean
+  children?: CreateWsNode[]
+}
+
+const CREATE_WORKSPACE_TREE: CreateWsNode[] = [
+  {
+    id: "users",
+    name: "Users",
+    kind: "folder",
+    count: 22,
+    defaultOpen: true,
+    children: [
+      {
+        id: "tanvi",
+        name: "tanvi",
+        kind: "folder",
+        count: 22,
+        defaultOpen: true,
+        children: [
+          {
+            id: "lakeflow",
+            name: "lakeflow",
+            kind: "folder",
+            count: 5,
+            defaultOpen: true,
+            children: [
+              { id: "adoption_overview", name: "adoption_overview", kind: "notebook" },
+              { id: "cohort_segmentation", name: "cohort_segmentation", kind: "notebook" },
+              { id: "retention_signals", name: "retention_signals", kind: "notebook" },
+              { id: "Adoption Dashboard", name: "Adoption Dashboard", kind: "dashboard" },
+              { id: "exec_readout.md", name: "exec_readout.md", kind: "file" },
+            ],
+          },
+          {
+            id: "support",
+            name: "support",
+            kind: "folder",
+            count: 4,
+            children: [
+              { id: "support_agent_builder", name: "support_agent_builder", kind: "notebook" },
+              { id: "ticket_triage", name: "ticket_triage", kind: "notebook" },
+              { id: "Support Metrics", name: "Support Metrics", kind: "dashboard" },
+              { id: "agent_instructions.md", name: "agent_instructions.md", kind: "file" },
+            ],
+          },
+          {
+            id: "reviews-pipeline",
+            name: "reviews-pipeline",
+            kind: "folder",
+            count: 3,
+            children: [
+              { id: "01_source_ingest", name: "01_source_ingest", kind: "notebook" },
+              { id: "02_bronze_clean", name: "02_bronze_clean", kind: "notebook" },
+              { id: "03_silver_join", name: "03_silver_join", kind: "notebook" },
+            ],
+          },
+          {
+            id: "q3",
+            name: "q3",
+            kind: "folder",
+            count: 4,
+            children: [
+              { id: "Sentiment Overview", name: "Sentiment Overview", kind: "dashboard" },
+              { id: "Product Mentions", name: "Product Mentions", kind: "dashboard" },
+              { id: "q3_review_rollup", name: "q3_review_rollup", kind: "notebook" },
+              { id: "exec_summary.md", name: "exec_summary.md", kind: "file" },
+            ],
+          },
+          {
+            id: "scratch",
+            name: "scratch",
+            kind: "folder",
+            count: 2,
+            children: [
+              { id: "scratch_reviews_exploration", name: "reviews_exploration", kind: "notebook" },
+              { id: "scratch_team_metrics_dash", name: "team_metrics_dash", kind: "dashboard" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+]
+
+function createAssetIcon(kind: CreateWsNode["kind"]) {
+  if (kind === "dashboard") return { icon: DashboardIcon, color: "text-[var(--success)]" }
+  if (kind === "file") return { icon: FileDocumentIcon, color: "text-muted-foreground" }
+  if (kind === "notebook") return { icon: NotebookIcon, color: "text-primary" }
+  return { icon: FolderOpenIcon, color: "text-[var(--warning)]" }
+}
+
+function collectCreateNodeIds(node: CreateWsNode): string[] {
+  return [node.id, ...(node.children?.flatMap(collectCreateNodeIds) ?? [])]
+}
+
+function nodeMatchesSearch(node: CreateWsNode, query: string): boolean {
+  if (!query) return true
+  const q = query.toLowerCase()
+  if (node.name.toLowerCase().includes(q)) return true
+  return node.children?.some((child) => nodeMatchesSearch(child, query)) ?? false
+}
+
+function CreateWorkspaceTreeRow({
+  node,
+  depth,
+  search,
+  selected,
+  onToggle,
+}: {
+  node: CreateWsNode
+  depth: number
+  search: string
+  selected: Set<string>
+  onToggle: (node: CreateWsNode, checked: boolean) => void
+}) {
+  const [open, setOpen] = React.useState(node.defaultOpen ?? depth < 2)
+  const hasChildren = !!node.children?.length
+  const visible = nodeMatchesSearch(node, search)
+  const childIds = React.useMemo(() => collectCreateNodeIds(node), [node])
+  const selectedCount = childIds.filter((id) => selected.has(id)).length
+  const checked =
+    selectedCount === childIds.length ? true : selectedCount > 0 ? "indeterminate" : false
+  const { icon: Icon, color } = createAssetIcon(node.kind)
+
+  React.useEffect(() => {
+    if (search && hasChildren) setOpen(true)
+  }, [search, hasChildren])
+
+  if (!visible) return null
+
+  return (
+    <>
+      <div
+        className="flex h-8 items-center gap-2 pr-3 hover:bg-[var(--action-default-bg-hover)]"
+        style={{ paddingLeft: 8 + depth * 16 }}
+      >
+        <button
+          type="button"
+          onClick={() => hasChildren && setOpen((v) => !v)}
+          aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`}
+          className={cn(
+            "flex size-4 shrink-0 items-center justify-center text-muted-foreground",
+            !hasChildren && "invisible",
+          )}
+        >
+          <ChevronRightIcon size={14} className={cn("transition-transform", open && "rotate-90")} />
+        </button>
+        <Checkbox
+          checked={checked}
+          onCheckedChange={(value) => onToggle(node, value === true)}
+          aria-label={`Select ${node.name}`}
+        />
+        <DbIcon icon={Icon} size={16} className={cn("shrink-0", color)} />
+        <span className="flex-1 truncate text-sm text-foreground">{node.name}</span>
+        {node.kind === "folder" && node.count != null && (
+          <span className="shrink-0 text-hint text-muted-foreground">{node.count}</span>
+        )}
+      </div>
+      {open &&
+        hasChildren &&
+        node.children!.map((child) => (
+          <CreateWorkspaceTreeRow
+            key={child.id}
+            node={child}
+            depth={depth + 1}
+            search={search}
+            selected={selected}
+            onToggle={onToggle}
+          />
+        ))}
+    </>
+  )
+}
+
+function CreateProjectView({
+  onCancel,
+  onCreate,
+}: {
+  onCancel: () => void
+  onCreate: (draft: { name: string; desc: string; assets: string[] }) => void
+}) {
+  const [name, setName] = React.useState("")
+  const [desc, setDesc] = React.useState("")
+  const [assetSearch, setAssetSearch] = React.useState("")
+  const [selectedAssets, setSelectedAssets] = React.useState<Set<string>>(new Set())
+  const [attempted, setAttempted] = React.useState(false)
+
+  const toggleNode = (node: CreateWsNode, checked: boolean) => {
+    const ids = collectCreateNodeIds(node)
+    setSelectedAssets((current) => {
+      const next = new Set(current)
+      for (const id of ids) {
+        if (checked) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }
+
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmedName = name.trim()
+    setAttempted(true)
+    if (!trimmedName) return
+    onCreate({
+      name: trimmedName,
+      desc: desc.trim(),
+      assets: [...selectedAssets],
+    })
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-y-auto px-8 py-6">
+      <form onSubmit={submit} className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={onCancel}
+          className="w-fit gap-1 px-0 text-muted-foreground"
+        >
+          <ArrowLeftIcon size={16} />
+          Projects
+        </Button>
+
+        <div className="flex flex-col gap-1">
+          <h2 className="text-xl font-semibold leading-7 text-foreground">Create a project</h2>
+          <p className="text-sm text-muted-foreground">
+            A project groups notebooks, dashboards, threads, and a scoped instructions file.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-6 rounded-md border border-border bg-background p-6 shadow-[var(--shadow-db-sm)]">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="project-name">Name</Label>
+            <Input
+              id="project-name"
+              autoFocus
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Bronze to Silver reviews pipeline"
+              aria-invalid={attempted && !name.trim()}
+              aria-describedby={attempted && !name.trim() ? "project-name-error" : undefined}
+            />
+            {attempted && !name.trim() && (
+              <p id="project-name-error" className="text-hint text-destructive">
+                Enter a project name.
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="project-description">Description</Label>
+            <Textarea
+              id="project-description"
+              value={desc}
+              onChange={(event) => setDesc(event.target.value)}
+              placeholder="What broader effort does this cover?"
+              className="min-h-20 resize-y"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div>
+              <Label htmlFor="asset-search">Attach assets (optional)</Label>
+              <p className="text-hint text-muted-foreground">
+                Browse your workspace and check folders or individual items — folder checks pull in
+                everything inside.
+              </p>
+            </div>
+
+            <div className="overflow-hidden rounded-md border border-border">
+              <div className="relative border-b border-border p-2">
+                <SearchIcon
+                  size={16}
+                  className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  id="asset-search"
+                  value={assetSearch}
+                  onChange={(event) => setAssetSearch(event.target.value)}
+                  placeholder="Search notebooks, dashboards, files..."
+                  className="pl-8"
+                />
+              </div>
+
+              <div className="flex items-center gap-1 border-b border-border bg-muted px-3 py-2 text-hint font-semibold uppercase tracking-wide text-muted-foreground">
+                <span>Workspace</span>
+                <ChevronRightIcon size={12} className="text-muted-foreground/70" />
+                <span>Users</span>
+                <ChevronRightIcon size={12} className="text-muted-foreground/70" />
+                <span className="truncate normal-case tracking-normal">
+                  tanvi.shanbhag@databricks.com
+                </span>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto py-1">
+                {CREATE_WORKSPACE_TREE.map((node) => (
+                  <CreateWorkspaceTreeRow
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    search={assetSearch}
+                    selected={selectedAssets}
+                    onToggle={toggleNode}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {selectedAssets.size > 0 && (
+              <p className="text-hint text-muted-foreground">
+                {selectedAssets.size} {selectedAssets.size === 1 ? "asset" : "assets"} selected
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="default" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm">
+            Create project
+          </Button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 // ─── Project detail ──────────────────────────────────────────────────────────────
 
 const PROJECT_DETAIL_TABS = [
   { value: "chats", label: "Chats" },
   { value: "assets", label: "Assets" },
+  { value: "skills", label: "Skills" },
   { value: "instructions", label: "Instructions" },
 ] as const
 
@@ -939,18 +1487,19 @@ function ProjectDetail({
   onOpenThread,
   onStartChat,
   extraThreads = [],
+  assignedThreadIds = [],
 }: {
   project: Project
   onBack: () => void
   onOpenThread?: (id: string) => void
   onStartChat?: (project: { id: string; name: string }, text: string) => void
   extraThreads?: DynamicThread[]
+  /** Built-in chats assigned to this project at runtime */
+  assignedThreadIds?: string[]
 }) {
   const [input, setInput] = React.useState("")
   const [tags, setTags] = React.useState<GenieTag[]>([])
   const [tab, setTab] = React.useState<string>("chats")
-  const [searchOpen, setSearchOpen] = React.useState(false)
-  const [search, setSearch] = React.useState("")
   const [sort, setSort] = React.useState("recent")
   const [addAssetOpen, setAddAssetOpen] = React.useState(false)
   const [ucOpen, setUcOpen] = React.useState(false)
@@ -1000,7 +1549,7 @@ function ProjectDetail({
           onSubmit={(text) => onStartChat?.({ id: project.id, name: project.name }, text)}
         />
 
-        {/* Tabs + search + sort */}
+        {/* Tabs + sort */}
         <div className="flex items-center gap-2">
           <SegmentedControl value={tab} onValueChange={setTab}>
             {PROJECT_DETAIL_TABS.map((t) => (
@@ -1008,40 +1557,18 @@ function ProjectDetail({
             ))}
           </SegmentedControl>
           <div className="flex-1" />
-          {/* Search + sort — only on the Chats tab */}
+          {/* Sort — only on the Chats tab */}
           {tab === "chats" && (
-            <>
-              {searchOpen ? (
-                <div className="relative">
-                  <SearchIcon
-                    size={16}
-                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <Input
-                    autoFocus
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onBlur={() => { if (!search) setSearchOpen(false) }}
-                    placeholder="Search chats"
-                    className="h-8 w-48 pl-8"
-                  />
-                </div>
-              ) : (
-                <Button variant="ghost" size="icon-sm" aria-label="Search chats" onClick={() => setSearchOpen(true)}>
-                  <SearchIcon size={16} className="text-muted-foreground" />
-                </Button>
-              )}
-              <Select value={sort} onValueChange={setSort}>
-                <SelectTrigger className="h-8 w-[150px]" aria-label="Sort chats">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="recent">Recent first</SelectItem>
-                  <SelectItem value="oldest">Oldest first</SelectItem>
-                  <SelectItem value="name">Name</SelectItem>
-                </SelectContent>
-              </Select>
-            </>
+            <Select value={sort} onValueChange={setSort}>
+              <SelectTrigger className="h-8 w-[150px]" aria-label="Sort chats">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="recent">Recent first</SelectItem>
+                <SelectItem value="oldest">Oldest first</SelectItem>
+                <SelectItem value="name">Name</SelectItem>
+              </SelectContent>
+            </Select>
           )}
         </div>
 
@@ -1079,16 +1606,34 @@ function ProjectDetail({
                     <span className="shrink-0 text-hint text-muted-foreground">{thread.time}</span>
                   </div>
                   {thread.preview && (
-                    <div className="flex items-center gap-1 pl-6">
-                      <span className="truncate text-hint text-muted-foreground">{thread.preview}</span>
-                      {thread.meta && (
-                        <span className="shrink-0 text-hint text-[var(--success)]">{thread.meta}</span>
-                      )}
-                    </div>
+                    <span className="truncate pl-6 text-hint text-muted-foreground">{thread.preview}</span>
                   )}
                 </button>
               )
             })}
+            {assignedThreadIds
+              .filter((tid) => !(PROJECT_CHAT_IDS[project.id] ?? []).includes(tid))
+              .map((tid) => {
+                const thread = GENIE_THREADS[tid]
+                if (!thread) return null
+                return (
+                  <button
+                    key={tid}
+                    type="button"
+                    onClick={() => onOpenThread?.(tid)}
+                    className="flex flex-col gap-0.5 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
+                  >
+                    <div className="flex items-center gap-2">
+                      <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
+                      <span className="flex-1 truncate text-sm text-foreground">{thread.title}</span>
+                      <span className="shrink-0 text-hint text-muted-foreground">{thread.time}</span>
+                    </div>
+                    {thread.preview && (
+                      <span className="truncate pl-6 text-hint text-muted-foreground">{thread.preview}</span>
+                    )}
+                  </button>
+                )
+              })}
           </div>
         )}
 
@@ -1171,6 +1716,9 @@ function ProjectDetail({
             </div>
           </div>
         )}
+
+        {/* Skills — reusable agent capabilities scoped to this project */}
+        {tab === "skills" && <ProjectSkillsPanel projectId={project.id} />}
 
         {/* Instructions — shown on the Instructions tab */}
         {tab === "instructions" && (
@@ -1418,6 +1966,137 @@ function UnityCatalogDialog({ open, onOpenChange }: { open: boolean; onOpenChang
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ─── Project skills ────────────────────────────────────────────────────────────
+
+type ProjectSkill = {
+  id: string
+  name: string
+  desc: string
+  updated: string
+}
+
+const PROJECT_SKILLS: Record<string, ProjectSkill[]> = {
+  p1: [
+    {
+      id: "s1",
+      name: "adoption-cohort-rollup",
+      desc: "Builds weekly Lakeflow Designer adoption cohorts and flags teams with drop-off.",
+      updated: "2d ago",
+    },
+    {
+      id: "s2",
+      name: "exec-readout-draft",
+      desc: "Drafts a Q3 exec readout from adoption notebooks and dashboard metrics.",
+      updated: "5d ago",
+    },
+  ],
+  p2: [
+    {
+      id: "s3",
+      name: "support-tool-router",
+      desc: "Routes support questions to the right review or product-docs tool.",
+      updated: "yesterday",
+    },
+  ],
+  p4: [
+    {
+      id: "s4",
+      name: "review-sentiment-summary",
+      desc: "Summarizes quarterly review sentiment and top product mentions.",
+      updated: "3d ago",
+    },
+    {
+      id: "s5",
+      name: "q3-dashboard-sync",
+      desc: "Refreshes Q3 review dashboards from the latest silver tables.",
+      updated: "1w ago",
+    },
+  ],
+}
+
+function ProjectSkillsPanel({ projectId }: { projectId: string }) {
+  const skills = PROJECT_SKILLS[projectId] ?? []
+  const [selectedId, setSelectedId] = React.useState<string | undefined>(skills[0]?.id)
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-4">
+        <p className="max-w-[560px] text-sm text-muted-foreground">
+          Skills are reusable workflows Genie can run in this project — write once, invoke from any chat.
+        </p>
+        <Button size="sm" className="shrink-0 gap-1">
+          <PlusIcon size={16} />
+          New skill
+        </Button>
+      </div>
+
+      {skills.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border px-4 py-12 text-center">
+          <DbIcon icon={WrenchSparkleIcon} size={24} className="mx-auto text-muted-foreground/50" />
+          <p className="mt-3 text-sm font-semibold text-foreground">No skills yet</p>
+          <p className="mt-1 text-hint text-muted-foreground">
+            Create a skill to capture a repeatable workflow for this project.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-md border border-border">
+          {skills.map((skill, index) => {
+            const selected = selectedId === skill.id
+            return (
+              <div
+                key={skill.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedId(skill.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    setSelectedId(skill.id)
+                  }
+                }}
+                className={cn(
+                  "flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors",
+                  index > 0 && "border-t border-border",
+                  selected ? "bg-primary/5" : "hover:bg-muted",
+                )}
+              >
+                <DbIcon
+                  icon={WrenchSparkleIcon}
+                  size={16}
+                  className={cn("mt-0.5 shrink-0", selected ? "text-primary" : "text-muted-foreground")}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "truncate text-sm",
+                        selected ? "font-semibold text-primary" : "font-semibold text-foreground",
+                      )}
+                    >
+                      {skill.name}
+                    </span>
+                    <span className="shrink-0 text-hint text-muted-foreground">{skill.updated}</span>
+                  </div>
+                  <p className="mt-0.5 line-clamp-2 text-hint text-muted-foreground">{skill.desc}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`More options for ${skill.name}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="mt-0.5 shrink-0"
+                >
+                  <OverflowIcon size={16} className="text-muted-foreground" />
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
