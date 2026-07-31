@@ -15,7 +15,9 @@ import {
   SearchIcon,
   ChevronRightIcon,
   FolderIcon,
+  PlusIcon,
 } from "@/components/icons"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +46,6 @@ const ACTIONS: { id: string; label: string; icon: React.ComponentType<any>; badg
   { id: "new-chat", label: "New chat", icon: NewChatIcon },
   { id: "schedules", label: "Schedules", icon: CalendarClockIcon },
   { id: "customizations", label: "Settings", icon: SlidersIcon },
-  { id: "projects", label: "Projects", icon: FolderIcon },
   { id: "inbox", label: "ZeroOps Inbox", icon: SyncIcon, badge: 5 },
 ]
 
@@ -85,9 +86,6 @@ const PANEL_PROJECTS: PanelProject[] = [
   { id: "p2", name: "Customer Support Agent Reboot", threadIds: ["c2", "c3"] },
   { id: "p4", name: "Q3 Reviews Analytics", threadIds: ["c7", "c8", "c9"] },
 ]
-
-// Threads owned by a project render only under Projects, not in the flat Chats list.
-const PROJECT_THREAD_IDS = new Set(PANEL_PROJECTS.flatMap((p) => p.threadIds))
 
 // ─── Exported lookups (so the page can render a selected thread) ────────────────
 
@@ -148,12 +146,7 @@ function ThreadRow({
         <span className="truncate text-hint text-primary">{thread.status}</span>
       ) : (
         thread.preview && (
-          <div className="flex items-center gap-1 pl-0">
-            <span className="truncate text-hint text-muted-foreground">{thread.preview}</span>
-            {thread.meta && (
-              <span className="shrink-0 text-hint text-[var(--success)]">{thread.meta}</span>
-            )}
-          </div>
+          <span className="truncate text-hint text-muted-foreground">{thread.preview}</span>
         )
       )}
     </button>
@@ -169,12 +162,24 @@ interface GenieThreadsPanelProps {
   activeThreadId?: string
   /** Session-created chats: project-tagged ones show in their folder, else Recents. */
   extraThreads?: ExtraThread[]
+  /** Session-created projects to append to the built-in project folders. */
+  extraProjects?: { id: string; name: string }[]
+  /** Runtime thread → project assignments. `null` = explicitly unassigned. */
+  threadAssignments?: Record<string, { id: string; name: string } | null>
   onSelectThread?: (id: string) => void
   onNewChat?: () => void
   /** Fired when an action row (schedules, customizations, projects, inbox) is clicked */
   onSelectAction?: (id: string) => void
+  /** Fired when a project name is clicked — opens that project's detail view */
+  onOpenProject?: (id: string) => void
+  /** Fired from the Projects header hover action — opens create-project */
+  onCreateProject?: () => void
+  /** Fired from a project-row hover action — starts a new chat in that project */
+  onNewChatInProject?: (project: { id: string; name: string }) => void
   /** Highlight the action row with this id as active (e.g. "projects") */
   activeAction?: string
+  /** Highlight the project row with this id as active */
+  activeProjectId?: string
   /** Status label shown on the active thread (e.g. "Waiting for your approval") */
   activeStatus?: string
   className?: string
@@ -183,10 +188,16 @@ interface GenieThreadsPanelProps {
 export function GenieThreadsPanel({
   activeThreadId,
   extraThreads = [],
+  extraProjects = [],
+  threadAssignments = {},
   onSelectThread,
   onNewChat,
   onSelectAction,
+  onOpenProject,
+  onCreateProject,
+  onNewChatInProject,
   activeAction,
+  activeProjectId,
   activeStatus,
   className,
 }: GenieThreadsPanelProps) {
@@ -202,6 +213,20 @@ export function GenieThreadsPanel({
   const [openProjects, setOpenProjects] = React.useState<Record<string, boolean>>({})
   const toggleProject = (id: string) =>
     setOpenProjects((prev) => ({ ...prev, [id]: !prev[id] }))
+  const panelProjects = [
+    ...PANEL_PROJECTS,
+    ...extraProjects
+      .filter((project) => !PANEL_PROJECTS.some((builtIn) => builtIn.id === project.id))
+      .map((project) => ({ ...project, threadIds: [] as string[] })),
+  ]
+
+  /** Effective project for a thread: runtime assignment wins over the static map. */
+  const projectIdForThread = (threadId: string): string | undefined => {
+    if (Object.prototype.hasOwnProperty.call(threadAssignments, threadId)) {
+      return threadAssignments[threadId]?.id
+    }
+    return PANEL_PROJECTS.find((p) => p.threadIds.includes(threadId))?.id
+  }
 
   return (
     <aside className={cn("flex w-[280px] shrink-0 flex-col border-r border-border", className)}>
@@ -271,63 +296,184 @@ export function GenieThreadsPanel({
           "[&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/40",
         )}
       >
-        {/* Projects — each project is a collapsible row (chevron on the right,
-            matching the Scheduled / Recents section headers below) */}
-        {!search &&
-          PANEL_PROJECTS.map((project) => {
-            const hasExtras = extraThreads.some((t) => t.projectId === project.id)
-            // Auto-expand a project when a new chat lands in it (unless the user
-            // has explicitly collapsed it).
-            const expanded = openProjects[project.id] ?? hasExtras
-            return (
-              <div key={project.id} className="flex flex-col gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => toggleProject(project.id)}
-                  className="group/proj flex h-7 w-full items-center gap-1.5 rounded px-2 text-left text-sm text-foreground transition-colors hover:bg-[var(--action-default-bg-hover)]"
-                >
-                  <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
-                  <span className="flex-1 truncate">{project.name}</span>
-                  <ChevronRightIcon
-                    size={12}
-                    className={cn(
-                      "ml-auto shrink-0 text-muted-foreground transition-all duration-150",
-                      expanded ? "rotate-90 opacity-0 group-hover/proj:opacity-100" : "opacity-100",
-                    )}
-                  />
-                </button>
-                {expanded && (
-                  <>
-                    {/* Session-created chats in this project, newest first */}
-                    {extraThreads
-                      .filter((t) => t.projectId === project.id)
-                      .map((t) => (
-                        <ThreadRow
-                          key={t.id}
-                          thread={{ id: t.id, title: t.title, preview: t.preview ?? "", time: "now" }}
-                          active={activeThreadId === t.id}
-                          onClick={() => onSelectThread?.(t.id)}
-                          className="pl-9"
-                        />
-                      ))}
-                    {project.threadIds.map((tid) => {
-                      const thread = GENIE_THREADS[tid]
-                      if (!thread) return null
-                      return (
-                        <ThreadRow
-                          key={tid}
-                          thread={thread}
-                          active={activeThreadId === tid}
-                          onClick={() => onSelectThread?.(tid)}
-                          className="pl-9"
-                        />
-                      )
-                    })}
-                  </>
+        {/* Projects — the section and each project are independently collapsible. */}
+        {!search && (
+          <div className="flex flex-col gap-0.5">
+            {/* Label opens the projects grid; + creates a project; chevron collapses. */}
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelectAction?.("projects")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  onSelectAction?.("projects")
+                }
+              }}
+              className={cn(
+                "group/header flex h-6 w-full cursor-pointer items-center gap-1 rounded px-2 text-left transition-colors hover:bg-[var(--action-default-bg-hover)]",
+                activeAction === "projects" && "bg-primary/10",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex-1 text-xs font-normal",
+                  activeAction === "projects" ? "text-primary font-semibold" : "text-muted-foreground",
                 )}
-              </div>
-            )
-          })}
+              >
+                Projects
+              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="New project"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onCreateProject?.()
+                    }}
+                    className="opacity-0 group-hover/header:opacity-100"
+                  >
+                    <PlusIcon size={14} className="text-muted-foreground" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>New project</TooltipContent>
+              </Tooltip>
+              <button
+                type="button"
+                aria-label={collapsed.Projects ? "Expand Projects" : "Collapse Projects"}
+                aria-expanded={!collapsed.Projects}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleGroup("Projects")
+                }}
+                className="flex size-4 shrink-0 items-center justify-center rounded"
+              >
+                <ChevronRightIcon
+                  size={12}
+                  className={cn(
+                    "shrink-0 text-muted-foreground transition-all duration-150",
+                    collapsed.Projects
+                      ? "opacity-100"
+                      : "rotate-90 opacity-0 group-hover/header:opacity-100",
+                  )}
+                />
+              </button>
+            </div>
+            {!collapsed.Projects &&
+              panelProjects.map((project) => {
+                const projectExtras = extraThreads.filter(
+                  (t) => (t.projectId ?? projectIdForThread(t.id)) === project.id,
+                )
+                const assignedBuiltIns = Object.entries(threadAssignments)
+                  .filter(([, proj]) => proj?.id === project.id)
+                  .map(([tid]) => tid)
+                  .filter((tid) => GENIE_THREADS[tid] && !project.threadIds.includes(tid))
+                const builtInIds = project.threadIds.filter(
+                  (tid) => projectIdForThread(tid) === project.id,
+                )
+                const hasThreads =
+                  projectExtras.length > 0 || builtInIds.length > 0 || assignedBuiltIns.length > 0
+                // Auto-expand a project when a new chat lands in it (unless the user
+                // has explicitly collapsed it).
+                const expanded = openProjects[project.id] ?? (projectExtras.length > 0 || assignedBuiltIns.length > 0)
+                const active = activeProjectId === project.id
+                return (
+                  <div key={project.id} className="flex flex-col gap-0.5">
+                    {/* Row opens the project; the chevron alone expands its chats,
+                        so the toggle is nested as its own control inside a div. */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onOpenProject?.(project.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          onOpenProject?.(project.id)
+                        }
+                      }}
+                      className={cn(
+                        "group/proj flex h-7 w-full cursor-pointer items-center gap-1.5 rounded px-2 text-left text-sm transition-colors",
+                        active
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-foreground hover:bg-[var(--action-default-bg-hover)]",
+                      )}
+                    >
+                      <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+                      <span className="flex-1 truncate">{project.name}</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`New chat in ${project.name}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onNewChatInProject?.({ id: project.id, name: project.name })
+                            }}
+                            className="opacity-0 group-hover/proj:opacity-100"
+                          >
+                            <NewChatIcon size={14} className="text-muted-foreground" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>New chat</TooltipContent>
+                      </Tooltip>
+                      <button
+                        type="button"
+                        aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
+                        aria-expanded={expanded}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleProject(project.id)
+                        }}
+                        className="flex size-4 shrink-0 items-center justify-center rounded"
+                      >
+                        <ChevronRightIcon
+                          size={12}
+                          className={cn(
+                            "shrink-0 text-muted-foreground transition-all duration-150",
+                            expanded ? "rotate-90 opacity-0 group-hover/proj:opacity-100" : "opacity-100",
+                          )}
+                        />
+                      </button>
+                    </div>
+                    {expanded && (
+                      <>
+                        {projectExtras.map((t) => (
+                          <ThreadRow
+                            key={t.id}
+                            thread={{ id: t.id, title: t.title, preview: t.preview ?? "", time: "now" }}
+                            active={activeThreadId === t.id}
+                            onClick={() => onSelectThread?.(t.id)}
+                            className="pl-9"
+                          />
+                        ))}
+                        {[...assignedBuiltIns, ...builtInIds].map((tid) => {
+                          const thread = GENIE_THREADS[tid]
+                          if (!thread) return null
+                          return (
+                            <ThreadRow
+                              key={tid}
+                              thread={thread}
+                              active={activeThreadId === tid}
+                              onClick={() => onSelectThread?.(tid)}
+                              className="pl-9"
+                            />
+                          )
+                        })}
+                        {!hasThreads && (
+                          <span className="px-2 py-1 pl-9 text-hint text-muted-foreground/70">No chats</span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+          </div>
+        )}
 
         {GROUPS.map((group) => {
           // Project-owned threads render only under Projects, never here.
@@ -335,12 +481,12 @@ export function GenieThreadsPanel({
           const recentsExtras: Thread[] =
             group.label === "Recents"
               ? extraThreads
-                  .filter((t) => !t.projectId)
+                  .filter((t) => !(t.projectId ?? projectIdForThread(t.id)))
                   .map((t) => ({ id: t.id, title: t.title, preview: t.preview ?? "", time: "now" }))
               : []
           const groupThreads = [
             ...recentsExtras,
-            ...group.threads.filter((t) => !PROJECT_THREAD_IDS.has(t.id)),
+            ...group.threads.filter((t) => !projectIdForThread(t.id)),
           ]
           const threads = search
             ? groupThreads.filter(
