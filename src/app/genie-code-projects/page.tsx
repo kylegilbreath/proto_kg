@@ -288,7 +288,13 @@ export default function GenieCodeProjects() {
     send(text, project)
   }
 
-  const createProject = (draft: { name: string; desc: string; assets: string[] }) => {
+  const createProject = (draft: {
+    name: string
+    desc: string
+    assets: string[]
+    ucAssets: string[]
+    instructions: string
+  }) => {
     const project: Project = {
       id: newProjectId(),
       name: draft.name,
@@ -297,6 +303,8 @@ export default function GenieCodeProjects() {
       chats: 0,
       scope: "yours",
       assets: draft.assets,
+      ucAssets: draft.ucAssets,
+      instructions: draft.instructions,
     }
     setProjects((current) => [project, ...current])
     setSelectedProjectId(project.id)
@@ -993,6 +1001,9 @@ type Project = {
   chats: number
   scope: "yours" | "shared"
   assets?: string[]
+  /** Unity Catalog tables/schemas selected for this project */
+  ucAssets?: string[]
+  instructions?: string
 }
 
 const PROJECTS: Project[] = [
@@ -1217,6 +1228,229 @@ const CREATE_WORKSPACE_TREE: CreateWsNode[] = [
   },
 ]
 
+/** Mock Unity Catalog FQNs for the create-project / assets pickers */
+const UC_TABLES = [
+  "main.lakeflow.adoption_events",
+  "main.lakeflow.team_rollup",
+  "main.lakeflow.exports",
+  "main.jason_messer.craigslist_vehicles",
+  "main.jason_messer.all_matches",
+  "main.jason_messer.amazon_books_data",
+  "main.jason_messer.amazon_books_ratings",
+  "main.jason_messer.asian_countries",
+  "kyle_gilbreath.nfl_combine_data.2025_nfl_combine",
+  "kyle_gilbreath.nfl_combine_data.2026_nfl_combine",
+]
+
+/** Catalogs the current user "owns" — used by For you filter */
+const UC_FOR_YOU_CATALOGS = new Set(["main"])
+
+type UcKind = "catalog" | "schema" | "table"
+
+type UcNode = {
+  name: string
+  fqn: string
+  kind: UcKind
+  children?: UcNode[]
+}
+
+function buildUcTree(tables: string[]): UcNode[] {
+  const catalogs = new Map<string, Map<string, string[]>>()
+  for (const fqn of tables) {
+    const [cat, sch, tbl] = fqn.split(".")
+    if (!cat || !sch || !tbl) continue
+    if (!catalogs.has(cat)) catalogs.set(cat, new Map())
+    const schemas = catalogs.get(cat)!
+    if (!schemas.has(sch)) schemas.set(sch, [])
+    schemas.get(sch)!.push(tbl)
+  }
+  return [...catalogs.entries()].map(([cat, schemas]) => ({
+    name: cat,
+    fqn: cat,
+    kind: "catalog" as const,
+    children: [...schemas.entries()].map(([sch, tbls]) => ({
+      name: sch,
+      fqn: `${cat}.${sch}`,
+      kind: "schema" as const,
+      children: tbls.map((tbl) => ({
+        name: tbl,
+        fqn: `${cat}.${sch}.${tbl}`,
+        kind: "table" as const,
+      })),
+    })),
+  }))
+}
+
+const UC_TREE = buildUcTree(UC_TABLES)
+
+function ucKindIcon(kind: UcKind) {
+  if (kind === "table") return TableIcon
+  if (kind === "schema") return SchemaIcon
+  return CatalogIcon
+}
+
+/**
+ * Databricks-style UC picker: drill catalog → schema → table with breadcrumbs,
+ * For you / All, search, and multi-select. Mirrors Catalog Explorer / Genie Agent
+ * data-source pickers (not a workspace folder tree).
+ */
+function CreateUcPicker({
+  selected,
+  onToggle,
+}: {
+  selected: Set<string>
+  onToggle: (fqn: string, checked: boolean) => void
+}) {
+  const [scope, setScope] = React.useState("all")
+  const [search, setSearch] = React.useState("")
+  const [path, setPath] = React.useState<UcNode[]>([])
+
+  const rootCatalogs = React.useMemo(
+    () =>
+      scope === "foryou"
+        ? UC_TREE.filter((c) => UC_FOR_YOU_CATALOGS.has(c.name))
+        : UC_TREE,
+    [scope],
+  )
+
+  const currentChildren: UcNode[] = path.length === 0 ? rootCatalogs : (path[path.length - 1].children ?? [])
+
+  const visible = React.useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return currentChildren
+    // Global search when querying: flatten matching tables under current root set
+    if (q.includes(".") || path.length === 0) {
+      const matches: UcNode[] = []
+      const walk = (nodes: UcNode[]) => {
+        for (const n of nodes) {
+          if (n.fqn.toLowerCase().includes(q) || n.name.toLowerCase().includes(q)) {
+            if (n.kind === "table" || !n.children?.length) matches.push(n)
+            else walk(n.children)
+          } else if (n.children) {
+            walk(n.children)
+          }
+        }
+      }
+      walk(rootCatalogs)
+      return matches
+    }
+    return currentChildren.filter(
+      (n) => n.name.toLowerCase().includes(q) || n.fqn.toLowerCase().includes(q),
+    )
+  }, [currentChildren, search, path.length, rootCatalogs])
+
+  const drillIn = (node: UcNode) => {
+    if (!node.children?.length) return
+    setSearch("")
+    setPath((p) => [...p, node])
+  }
+
+  const goToBreadcrumb = (index: number) => {
+    setSearch("")
+    if (index < 0) setPath([])
+    else setPath((p) => p.slice(0, index + 1))
+  }
+
+  return (
+    <div className="overflow-hidden rounded-md border border-border">
+      <div className="flex items-center gap-2 border-b border-border p-2">
+        <div className="relative flex-1">
+          <SearchIcon
+            size={16}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search catalogs, schemas, tables…"
+            className="pl-8"
+          />
+        </div>
+        <SegmentedControl value={scope} onValueChange={setScope}>
+          <SegmentedItem value="foryou">For you</SegmentedItem>
+          <SegmentedItem value="all">All</SegmentedItem>
+        </SegmentedControl>
+      </div>
+
+      <div className="flex items-center gap-1 border-b border-border bg-muted px-3 py-2 text-hint font-semibold uppercase tracking-wide text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => goToBreadcrumb(-1)}
+          className={cn(
+            "truncate normal-case tracking-normal",
+            path.length === 0 ? "text-foreground" : "text-primary hover:underline",
+          )}
+        >
+          All catalogs
+        </button>
+        {path.map((node, i) => (
+          <React.Fragment key={node.fqn}>
+            <ChevronRightIcon size={12} className="shrink-0 text-muted-foreground/70" />
+            <button
+              type="button"
+              onClick={() => goToBreadcrumb(i)}
+              className={cn(
+                "truncate normal-case tracking-normal",
+                i === path.length - 1 ? "text-foreground" : "text-primary hover:underline",
+              )}
+            >
+              {node.name}
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
+
+      <div className="max-h-56 overflow-y-auto py-1">
+        {visible.length === 0 ? (
+          <p className="px-3 py-6 text-center text-hint text-muted-foreground">No matches.</p>
+        ) : (
+          visible.map((node) => {
+            const Icon = ucKindIcon(node.kind)
+            const checked = selected.has(node.fqn)
+            const canDrill = !!node.children?.length && !search.includes(".")
+            return (
+              <div
+                key={node.fqn}
+                className="flex h-8 items-center gap-2 px-3 hover:bg-[var(--action-default-bg-hover)]"
+              >
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={(value) => onToggle(node.fqn, value === true)}
+                  aria-label={`Select ${node.fqn}`}
+                />
+                <DbIcon icon={Icon} size={16} className="shrink-0 text-primary" />
+                {canDrill ? (
+                  <button
+                    type="button"
+                    onClick={() => drillIn(node)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span className="truncate text-sm text-foreground">{node.name}</span>
+                    <span className="shrink-0 text-hint text-muted-foreground">
+                      {node.children!.length}
+                    </span>
+                    <ChevronRightIcon size={14} className="ml-auto shrink-0 text-muted-foreground" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onToggle(node.fqn, !checked)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span className="truncate text-sm text-foreground">
+                      {search ? node.fqn : node.name}
+                    </span>
+                  </button>
+                )}
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
 function createAssetIcon(kind: CreateWsNode["kind"]) {
   if (kind === "dashboard") return { icon: DashboardIcon, color: "text-[var(--success)]" }
   if (kind === "file") return { icon: FileDocumentIcon, color: "text-muted-foreground" }
@@ -1312,12 +1546,20 @@ function CreateProjectView({
   onCreate,
 }: {
   onCancel: () => void
-  onCreate: (draft: { name: string; desc: string; assets: string[] }) => void
+  onCreate: (draft: {
+    name: string
+    desc: string
+    assets: string[]
+    ucAssets: string[]
+    instructions: string
+  }) => void
 }) {
   const [name, setName] = React.useState("")
   const [desc, setDesc] = React.useState("")
   const [assetSearch, setAssetSearch] = React.useState("")
   const [selectedAssets, setSelectedAssets] = React.useState<Set<string>>(new Set())
+  const [selectedUc, setSelectedUc] = React.useState<Set<string>>(new Set())
+  const [instructions, setInstructions] = React.useState("")
   const [attempted, setAttempted] = React.useState(false)
 
   const toggleNode = (node: CreateWsNode, checked: boolean) => {
@@ -1332,6 +1574,15 @@ function CreateProjectView({
     })
   }
 
+  const toggleUc = (fqn: string, checked: boolean) => {
+    setSelectedUc((current) => {
+      const next = new Set(current)
+      if (checked) next.add(fqn)
+      else next.delete(fqn)
+      return next
+    })
+  }
+
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const trimmedName = name.trim()
@@ -1341,6 +1592,8 @@ function CreateProjectView({
       name: trimmedName,
       desc: desc.trim(),
       assets: [...selectedAssets],
+      ucAssets: [...selectedUc],
+      instructions: instructions.trim(),
     })
   }
 
@@ -1397,7 +1650,7 @@ function CreateProjectView({
 
           <div className="flex flex-col gap-2">
             <div>
-              <Label htmlFor="asset-search">Attach assets (optional)</Label>
+              <Label htmlFor="asset-search">Attach workspace assets (optional)</Label>
               <p className="text-hint text-muted-foreground">
                 Browse your workspace and check folders or individual items — folder checks pull in
                 everything inside.
@@ -1448,6 +1701,42 @@ function CreateProjectView({
                 {selectedAssets.size} {selectedAssets.size === 1 ? "asset" : "assets"} selected
               </p>
             )}
+          </div>
+
+          {/* Unity Catalog picker — Databricks-style hierarchy, not a workspace tree */}
+          <div className="flex flex-col gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <CatalogIcon size={16} className="shrink-0 text-primary" />
+                <Label>Add Unity Catalog assets</Label>
+              </div>
+              <p className="text-hint text-muted-foreground">
+                Browse catalog → schema → table (same pattern as Catalog Explorer). Select catalogs,
+                schemas, or tables to include in this project.
+              </p>
+            </div>
+            <CreateUcPicker selected={selectedUc} onToggle={toggleUc} />
+            {selectedUc.size > 0 && (
+              <p className="text-hint text-muted-foreground">
+                {selectedUc.size} UC {selectedUc.size === 1 ? "asset" : "assets"} selected
+              </p>
+            )}
+          </div>
+
+          {/* Instructions */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="project-instructions">Project instructions</Label>
+            <p className="text-hint text-muted-foreground">
+              Preferred response tone, guidelines, and what you&apos;re working on. You can keep
+              editing these after create.
+            </p>
+            <Textarea
+              id="project-instructions"
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder={`# Guidelines\n\n- Keep answers concise and cite the tables you used.\n- Prefer weekly aggregates for exec readouts.`}
+              className="min-h-44 resize-y font-mono text-sm"
+            />
           </div>
         </div>
 
@@ -1503,6 +1792,19 @@ function ProjectDetail({
   const [sort, setSort] = React.useState("recent")
   const [addAssetOpen, setAddAssetOpen] = React.useState(false)
   const [ucOpen, setUcOpen] = React.useState(false)
+  const [ucAssets, setUcAssets] = React.useState<string[]>(
+    () => project.ucAssets ?? UC_ASSETS.map((a) => a.name),
+  )
+
+  const addUcAssets = (names: string[]) => {
+    setUcAssets((current) => {
+      const next = [...current]
+      for (const name of names) {
+        if (!next.includes(name)) next.push(name)
+      }
+      return next
+    })
+  }
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto px-8 py-6">
@@ -1682,17 +1984,22 @@ function ProjectDetail({
             {/* Unity Catalog */}
             <div className="rounded-md border border-border">
               <div className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Unity Catalog <span className="mx-1 font-normal">·</span> 2 tables
-                <span className="mx-1 font-normal">·</span> 1 schema
-                <span className="mx-1 font-normal">·</span> 1 volume
+                Unity Catalog <span className="mx-1 font-normal">·</span> {ucAssets.length}{" "}
+                {ucAssets.length === 1 ? "asset" : "assets"}
               </div>
               <div className="flex flex-col py-1">
-                {UC_ASSETS.map((a) => (
-                  <div key={a.name} className="flex items-center gap-2 px-3 py-1.5">
-                    <DbIcon icon={a.icon} size={16} className="shrink-0 text-primary" />
-                    <span className="truncate text-sm text-foreground">{a.name}</span>
-                  </div>
-                ))}
+                {ucAssets.length === 0 ? (
+                  <p className="px-3 py-4 text-hint text-muted-foreground">
+                    No Unity Catalog assets yet. Add tables or schemas from the menu above.
+                  </p>
+                ) : (
+                  ucAssets.map((name) => (
+                    <div key={name} className="flex items-center gap-2 px-3 py-1.5">
+                      <DbIcon icon={TableIcon} size={16} className="shrink-0 text-primary" />
+                      <span className="truncate text-sm text-foreground">{name}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
@@ -1728,13 +2035,18 @@ function ProjectDetail({
               response tone, what you&apos;re working on.{" "}
               <a href="#" className="text-primary hover:underline">Learn more</a>
             </p>
-            <InstructionsDoc />
+            <InstructionsDoc initialValue={project.instructions} />
           </div>
         )}
       </div>
 
       <AddAssetDialog open={addAssetOpen} onOpenChange={setAddAssetOpen} />
-      <UnityCatalogDialog open={ucOpen} onOpenChange={setUcOpen} />
+      <UnityCatalogDialog
+        open={ucOpen}
+        onOpenChange={setUcOpen}
+        alreadySelected={ucAssets}
+        onAdd={addUcAssets}
+      />
     </div>
   )
 }
@@ -1873,22 +2185,52 @@ function AddAssetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   )
 }
 
-const UC_TABLES = [
-  "all_matches",
-  "amazon_books_data",
-  "amazon_books_data_drift_metrics",
-  "amazon_books_data_profile_metrics",
-  "amazon_books_ratings",
-  "asian_countries",
-  "autocomplete_improvements_demo",
-]
-
-function UnityCatalogDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function UnityCatalogDialog({
+  open,
+  onOpenChange,
+  onAdd,
+  alreadySelected = [],
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  /** Called with newly chosen table names when Add is confirmed */
+  onAdd?: (tables: string[]) => void
+  /** Tables already pinned — shown checked and excluded from the Add payload */
+  alreadySelected?: string[]
+}) {
   const [search, setSearch] = React.useState("")
   const [scope, setScope] = React.useState("all")
+  const [selected, setSelected] = React.useState<Set<string>>(new Set())
+
+  React.useEffect(() => {
+    if (open) {
+      setSelected(new Set(alreadySelected))
+      setSearch("")
+    }
+  }, [open, alreadySelected])
+
   const tables = search
     ? UC_TABLES.filter((t) => t.toLowerCase().includes(search.toLowerCase()))
     : UC_TABLES
+
+  const alreadySet = React.useMemo(() => new Set(alreadySelected), [alreadySelected])
+  const newlySelected = [...selected].filter((t) => !alreadySet.has(t))
+  const selectedCount = newlySelected.length
+
+  const toggleTable = (name: string, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (checked) next.add(name)
+      else next.delete(name)
+      return next
+    })
+  }
+
+  const handleAdd = () => {
+    if (selectedCount === 0) return
+    onAdd?.(newlySelected)
+    onOpenChange(false)
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1896,7 +2238,8 @@ function UnityCatalogDialog({ open, onOpenChange }: { open: boolean; onOpenChang
         <DialogHeader>
           <DialogTitle>Add from Unity Catalog</DialogTitle>
           <DialogDescription>
-            Browse catalogs, schemas, and tables — pin what this project should reference.
+            Browse catalogs, schemas, and tables — pin what this project should reference in
+            instructions.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-3">
@@ -1946,23 +2289,50 @@ function UnityCatalogDialog({ open, onOpenChange }: { open: boolean; onOpenChang
             {tables.length === 0 ? (
               <p className="px-2 py-6 text-center text-hint text-muted-foreground">No matches.</p>
             ) : (
-              tables.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-muted"
-                >
-                  <TableIcon size={16} className="shrink-0 text-primary" />
-                  <span className="truncate text-sm text-foreground">{t}</span>
-                </button>
-              ))
+              tables.map((t) => {
+                const checked = selected.has(t)
+                const already = alreadySet.has(t)
+                return (
+                  <div
+                    key={t}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleTable(t, !checked)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        toggleTable(t, !checked)
+                      }
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-muted"
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(value) => toggleTable(t, value === true)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select ${t}`}
+                    />
+                    <TableIcon size={16} className="shrink-0 text-primary" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">{t}</span>
+                    {already && (
+                      <span className="shrink-0 text-hint text-muted-foreground">In instructions</span>
+                    )}
+                  </div>
+                )
+              })
             )}
           </div>
         </DialogBody>
         <DialogFooter className="items-center">
-          <span className="mr-auto text-hint text-muted-foreground">Nothing selected</span>
+          <span className="mr-auto text-hint text-muted-foreground">
+            {selectedCount === 0
+              ? "Nothing selected"
+              : `${selectedCount} ${selectedCount === 1 ? "table" : "tables"} selected`}
+          </span>
           <Button variant="default" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button size="sm" disabled>Add</Button>
+          <Button size="sm" disabled={selectedCount === 0 || !onAdd} onClick={handleAdd}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -2116,21 +2486,42 @@ const AGENT_MEMORIES = [
 const INSTRUCTIONS_MARKDOWN =
   `# Something\n\n- ${INSTRUCTION_RULES.join("\n- ")}\n\n# Agent Memories\n\n- ${AGENT_MEMORIES.join("\n- ")}`
 
-function InstructionsDoc() {
+function InstructionsDoc({
+  initialValue,
+}: {
+  /** When set (including empty string), use instead of the demo markdown */
+  initialValue?: string
+}) {
+  const seed = initialValue !== undefined ? initialValue : INSTRUCTIONS_MARKDOWN
   const [editing, setEditing] = React.useState(false)
-  const [draft, setDraft] = React.useState(INSTRUCTIONS_MARKDOWN)
+  const [draft, setDraft] = React.useState(seed)
+  const [saved, setSaved] = React.useState(seed)
+  const isDefaultDemo = initialValue === undefined && saved === INSTRUCTIONS_MARKDOWN
 
   return (
     <div className="rounded-md border border-border">
-      {/* Header: filename + edit/save/cancel */}
       <div className="flex items-center gap-2 border-b border-border bg-secondary px-4 py-2">
         <span className="flex-1 text-sm font-semibold text-foreground">Project instructions</span>
         {editing ? (
           <>
-            <Button variant="default" size="sm" onClick={() => { setDraft(INSTRUCTIONS_MARKDOWN); setEditing(false) }}>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => {
+                setDraft(saved)
+                setEditing(false)
+              }}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" onClick={() => setEditing(false)}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setSaved(draft)
+                setEditing(false)
+              }}
+            >
               Save
             </Button>
           </>
@@ -2141,7 +2532,6 @@ function InstructionsDoc() {
         )}
       </div>
 
-      {/* Body */}
       <div className="px-5 py-4">
         {editing ? (
           <textarea
@@ -2149,8 +2539,9 @@ function InstructionsDoc() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             className="min-h-[280px] w-full resize-none bg-transparent font-mono text-sm text-foreground outline-none"
+            placeholder={`# Guidelines\n\n- Keep answers concise and cite the tables you used.`}
           />
-        ) : (
+        ) : isDefaultDemo ? (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <h3 className="text-lg font-semibold text-foreground">Something</h3>
@@ -2165,6 +2556,12 @@ function InstructionsDoc() {
               </ul>
             </div>
           </div>
+        ) : saved.trim() ? (
+          <pre className="whitespace-pre-wrap font-mono text-sm text-foreground">{saved}</pre>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No instructions yet. Edit to add guidelines or agent memories.
+          </p>
         )}
       </div>
     </div>
