@@ -293,7 +293,6 @@ export default function GenieCodeProjects() {
     desc: string
     assets: string[]
     ucAssets: string[]
-    instructions: string
   }) => {
     const project: Project = {
       id: newProjectId(),
@@ -304,7 +303,6 @@ export default function GenieCodeProjects() {
       scope: "yours",
       assets: draft.assets,
       ucAssets: draft.ucAssets,
-      instructions: draft.instructions,
     }
     setProjects((current) => [project, ...current])
     setSelectedProjectId(project.id)
@@ -1551,7 +1549,6 @@ function CreateProjectView({
     desc: string
     assets: string[]
     ucAssets: string[]
-    instructions: string
   }) => void
 }) {
   const [name, setName] = React.useState("")
@@ -1559,7 +1556,6 @@ function CreateProjectView({
   const [assetSearch, setAssetSearch] = React.useState("")
   const [selectedAssets, setSelectedAssets] = React.useState<Set<string>>(new Set())
   const [selectedUc, setSelectedUc] = React.useState<Set<string>>(new Set())
-  const [instructions, setInstructions] = React.useState("")
   const [attempted, setAttempted] = React.useState(false)
 
   const toggleNode = (node: CreateWsNode, checked: boolean) => {
@@ -1593,7 +1589,6 @@ function CreateProjectView({
       desc: desc.trim(),
       assets: [...selectedAssets],
       ucAssets: [...selectedUc],
-      instructions: instructions.trim(),
     })
   }
 
@@ -1614,7 +1609,7 @@ function CreateProjectView({
         <div className="flex flex-col gap-1">
           <h2 className="text-xl font-semibold leading-7 text-foreground">Create a project</h2>
           <p className="text-sm text-muted-foreground">
-            A project groups notebooks, dashboards, threads, and a scoped instructions file.
+            A project groups notebooks, dashboards, threads, and Unity Catalog assets.
           </p>
         </div>
 
@@ -1721,22 +1716,6 @@ function CreateProjectView({
                 {selectedUc.size} UC {selectedUc.size === 1 ? "asset" : "assets"} selected
               </p>
             )}
-          </div>
-
-          {/* Instructions */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="project-instructions">Project instructions</Label>
-            <p className="text-hint text-muted-foreground">
-              Preferred response tone, guidelines, and what you&apos;re working on. You can keep
-              editing these after create.
-            </p>
-            <Textarea
-              id="project-instructions"
-              value={instructions}
-              onChange={(event) => setInstructions(event.target.value)}
-              placeholder={`# Guidelines\n\n- Keep answers concise and cite the tables you used.\n- Prefer weekly aggregates for exec readouts.`}
-              className="min-h-44 resize-y font-mono text-sm"
-            />
           </div>
         </div>
 
