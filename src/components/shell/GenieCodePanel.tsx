@@ -14,7 +14,6 @@ import {
   OverflowIcon,
   CloseIcon,
   FolderIcon,
-  CheckIcon,
 } from "@/components/icons"
 import { GeniePrompt, type GenieTag } from "@/components/ai-elements/genie-prompt"
 import {
@@ -255,73 +254,66 @@ export function GenieCodePanel({ open, onClose, className }: GenieCodePanelProps
 
           {/* Compose area — Add to project lives on the prompt action bar */}
           <div className="shrink-0 p-3">
-            <Popover open={projectPopoverOpen} onOpenChange={setProjectPopoverOpen}>
-              <PopoverTrigger asChild>
-                <div className="w-full">
-                  <GeniePrompt
-                    variant="chat"
-                    size="small"
-                    value={input}
-                    onChange={setInput}
-                    onSubmit={handleSubmit}
-                    tags={tags}
-                    onTagRemove={(id) => setTags((prev) => prev.filter((t) => t.id !== id))}
-                    placeholder="Ask Genie Code..."
-                    projectLabel={assignedProject?.name ?? true}
-                    onChooseProject={() => setProjectPopoverOpen((v) => !v)}
-                  />
-                </div>
-              </PopoverTrigger>
-              <PopoverContent align="start" side="top" className="w-[280px] p-1">
-                <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
-                {projects.map((p) => {
-                  const selected = assignedProject?.id === p.id
-                  return (
-                    <div
+            {assignedProject ? (
+              <div className="w-full">
+                <GeniePrompt
+                  variant="chat"
+                  size="small"
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={handleSubmit}
+                  tags={tags}
+                  onTagRemove={(id) => setTags((prev) => prev.filter((t) => t.id !== id))}
+                  placeholder="Ask Genie Code..."
+                  projectLabel={assignedProject.name}
+                />
+              </div>
+            ) : (
+              <Popover open={projectPopoverOpen} onOpenChange={setProjectPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <div className="w-full">
+                    <GeniePrompt
+                      variant="chat"
+                      size="small"
+                      value={input}
+                      onChange={setInput}
+                      onSubmit={handleSubmit}
+                      tags={tags}
+                      onTagRemove={(id) => setTags((prev) => prev.filter((t) => t.id !== id))}
+                      placeholder="Ask Genie Code..."
+                      projectLabel={true}
+                      onChooseProject={() => setProjectPopoverOpen((v) => !v)}
+                    />
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent align="start" side="top" className="w-[280px] p-1">
+                  <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
+                  {projects.map((p) => (
+                    <button
                       key={p.id}
-                      className={cn(
-                        "group/row flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors hover:bg-muted",
-                        selected ? "text-primary" : "text-foreground",
-                      )}
+                      type="button"
+                      onClick={() => {
+                        setAssignedProject(p)
+                        setProjectPopoverOpen(false)
+                      }}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
                     >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAssignedProject(p)
-                          setProjectPopoverOpen(false)
-                        }}
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                      >
-                        <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
-                        <span className="flex-1 truncate">{p.name}</span>
-                      </button>
-                      {selected ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAssignedProject(undefined)
-                            setProjectPopoverOpen(false)
-                          }}
-                          className="shrink-0 text-hint text-muted-foreground hover:text-foreground hover:underline"
-                        >
-                          Remove
-                        </button>
-                      ) : null}
-                      {selected && <CheckIcon size={14} className="shrink-0 text-primary" />}
-                    </div>
-                  )
-                })}
-                <div className="my-1 border-t border-border" />
-                <button
-                  type="button"
-                  onClick={createProject}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
-                >
-                  <PlusIcon size={16} className="shrink-0 text-muted-foreground" />
-                  <span>Create new project</span>
-                </button>
-              </PopoverContent>
-            </Popover>
+                      <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+                      <span className="flex-1 truncate">{p.name}</span>
+                    </button>
+                  ))}
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    type="button"
+                    onClick={createProject}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                  >
+                    <PlusIcon size={16} className="shrink-0 text-muted-foreground" />
+                    <span>Create new project</span>
+                  </button>
+                </PopoverContent>
+              </Popover>
+            )}
             <p className="mt-2 text-center text-[12px] leading-4 text-muted-foreground">
               Only use the agent with code and data you trust
             </p>
