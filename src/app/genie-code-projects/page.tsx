@@ -313,14 +313,25 @@ export default function GenieCodeProjects() {
     threadId: string,
     project: { id: string; name: string } | undefined,
   ) => {
+    // Once a thread has a project, it cannot be reassigned or cleared.
+    const existing = (() => {
+      if (Object.prototype.hasOwnProperty.call(threadAssignments, threadId)) {
+        return threadAssignments[threadId] ?? undefined
+      }
+      const dyn = dynamicThreads.find((t) => t.id === threadId)
+      if (dyn?.projectId) return { id: dyn.projectId, name: dyn.projectName ?? "" }
+      return threadProject(threadId)
+    })()
+    if (existing || !project) return
+
     setThreadAssignments((current) => ({
       ...current,
-      [threadId]: project ?? null,
+      [threadId]: project,
     }))
     setDynamicThreads((current) =>
       current.map((t) =>
         t.id === threadId
-          ? { ...t, projectId: project?.id, projectName: project?.name }
+          ? { ...t, projectId: project.id, projectName: project.name }
           : t,
       ),
     )
@@ -436,6 +447,7 @@ export default function GenieCodeProjects() {
                     projects={projects}
                     assigned={conversationProject}
                     onAssign={(project) => {
+                      if (conversationProject) return
                       if (activeThreadId) assignThreadToProject(activeThreadId, project)
                       else setConversationProject(project)
                     }}
@@ -683,63 +695,44 @@ function AssignToProjectMenu({
 }) {
   const [open, setOpen] = React.useState(false)
 
+  // Assigned threads are locked — show the project name, but no move/remove.
+  if (assigned) {
+    return (
+      <div
+        className="flex h-8 max-w-[220px] shrink-0 items-center gap-1.5 rounded px-2 text-sm text-foreground"
+        title={`Assigned to ${assigned.name}`}
+      >
+        <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+        <span className="truncate">{assigned.name}</span>
+      </div>
+    )
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "shrink-0 gap-1",
-            assigned ? "text-muted-foreground" : "text-foreground",
-          )}
-        >
+        <Button variant="ghost" size="sm" className="shrink-0 gap-1 text-foreground">
           <FolderIcon size={16} className="text-[var(--warning)]" />
-          {assigned ? "Move project" : "Add to project"}
+          Add to project
           <ChevronDownIcon size={14} className="text-muted-foreground" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[280px] p-1">
-        <p className="px-2 py-1.5 text-hint text-muted-foreground">
-          {assigned ? "Move to project" : "Add to project"}
-        </p>
-        {projects.map((p) => {
-          const selected = assigned?.id === p.id
-          return (
-            <div
-              key={p.id}
-              className={cn(
-                "group/row flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors hover:bg-muted",
-                selected ? "text-primary" : "text-foreground",
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  onAssign({ id: p.id, name: p.name })
-                  setOpen(false)
-                }}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              >
-                <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
-                <span className="flex-1 truncate">{p.name}</span>
-              </button>
-              {selected ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onAssign(undefined)
-                    setOpen(false)
-                  }}
-                  className="shrink-0 text-hint text-muted-foreground hover:text-foreground hover:underline"
-                >
-                  Remove
-                </button>
-              ) : null}
-              {selected && <CheckIcon size={14} className="shrink-0 text-primary" />}
-            </div>
-          )
-        })}
+        <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
+        {projects.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => {
+              onAssign({ id: p.id, name: p.name })
+              setOpen(false)
+            }}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+          >
+            <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+            <span className="flex-1 truncate">{p.name}</span>
+          </button>
+        ))}
         <div className="my-1 border-t border-border" />
         <button
           type="button"
