@@ -6,7 +6,7 @@ import { ChevronsLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DbIcon } from "@/components/ui/db-icon"
 import { SuggestionPill } from "@/components/ui/suggestion-pill"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import {
   GenieCodeIcon,
@@ -270,7 +270,8 @@ export function GenieCodePanel({ open, onClose, className }: GenieCodePanelProps
               </div>
             ) : (
               <Popover open={projectPopoverOpen} onOpenChange={setProjectPopoverOpen}>
-                <PopoverTrigger asChild>
+                {/* Anchor (not trigger) so typing in the prompt can't toggle the popover */}
+                <PopoverAnchor asChild>
                   <div className="w-full">
                     <GeniePrompt
                       variant="chat"
@@ -285,7 +286,7 @@ export function GenieCodePanel({ open, onClose, className }: GenieCodePanelProps
                       onChooseProject={() => setProjectPopoverOpen((v) => !v)}
                     />
                   </div>
-                </PopoverTrigger>
+                </PopoverAnchor>
                 <PopoverContent align="start" side="top" className="w-[280px] p-1">
                   <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
                   {projects.map((p) => (
