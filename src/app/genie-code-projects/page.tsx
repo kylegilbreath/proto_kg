@@ -1546,6 +1546,7 @@ function CreateProjectView({
   const [assetSearch, setAssetSearch] = React.useState("")
   const [selectedAssets, setSelectedAssets] = React.useState<Set<string>>(new Set())
   const [selectedUc, setSelectedUc] = React.useState<Set<string>>(new Set())
+  const [ucPickerOpen, setUcPickerOpen] = React.useState(false)
   const [attempted, setAttempted] = React.useState(false)
 
   const toggleNode = (node: CreateWsNode, checked: boolean) => {
@@ -1688,25 +1689,36 @@ function CreateProjectView({
             )}
           </div>
 
-          {/* Unity Catalog picker — Databricks-style hierarchy, not a workspace tree */}
-          <div className="flex flex-col gap-2">
+          {/* Unity Catalog picker — collapsed by default; optional like workspace assets */}
+          <Collapsible open={ucPickerOpen} onOpenChange={setUcPickerOpen} className="flex flex-col gap-2">
             <div>
-              <div className="flex items-center gap-2">
+              <CollapsibleTrigger className="group flex w-full items-center gap-2 text-left">
                 <CatalogIcon size={16} className="shrink-0 text-primary" />
-                <Label>Add Unity Catalog assets</Label>
-              </div>
+                <span className="text-sm font-semibold leading-5 text-foreground">
+                  Add Unity Catalog assets (optional)
+                </span>
+                <ChevronRightIcon
+                  size={14}
+                  className={cn(
+                    "ml-auto shrink-0 text-muted-foreground transition-transform duration-150",
+                    ucPickerOpen && "rotate-90",
+                  )}
+                />
+              </CollapsibleTrigger>
               <p className="text-hint text-muted-foreground">
                 Browse catalog → schema → table (same pattern as Catalog Explorer). Select catalogs,
                 schemas, or tables to include in this project.
               </p>
             </div>
-            <CreateUcPicker selected={selectedUc} onToggle={toggleUc} />
+            <CollapsibleContent>
+              <CreateUcPicker selected={selectedUc} onToggle={toggleUc} />
+            </CollapsibleContent>
             {selectedUc.size > 0 && (
               <p className="text-hint text-muted-foreground">
                 {selectedUc.size} UC {selectedUc.size === 1 ? "asset" : "assets"} selected
               </p>
             )}
-          </div>
+          </Collapsible>
         </div>
 
         <div className="flex justify-end gap-2">
