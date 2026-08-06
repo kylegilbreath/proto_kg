@@ -279,7 +279,8 @@ export function GeniePrompt({
   );
 
   const hasProject = typeof projectLabel === "string";
-  const projectButton = (
+  const canChooseProject = typeof onChooseProject === "function";
+  const projectButton = canChooseProject ? (
     <button
       type="button"
       onClick={onChooseProject}
@@ -297,7 +298,15 @@ export function GeniePrompt({
       </span>
       <ChevronDownIcon size={16} className="shrink-0 text-muted-foreground" />
     </button>
-  );
+  ) : hasProject ? (
+    <div
+      className="flex h-7 max-w-[220px] shrink-0 items-center gap-1.5 rounded px-2 text-sm"
+      title={`Assigned to ${projectLabel}`}
+    >
+      <FolderIcon size={16} className="shrink-0 text-[var(--warning)]" />
+      <span className="truncate text-foreground">{projectLabel}</span>
+    </div>
+  ) : null;
 
   // ── Variant: toggle ───────────────────────────────────────────────────────
 
