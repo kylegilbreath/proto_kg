@@ -1697,13 +1697,15 @@ function CreateProjectView({
                 <span className="text-sm font-semibold leading-5 text-foreground">
                   Add Unity Catalog assets (optional)
                 </span>
-                <ChevronRightIcon
-                  size={14}
-                  className={cn(
-                    "ml-auto shrink-0 text-muted-foreground transition-transform duration-150",
-                    ucPickerOpen && "rotate-90",
-                  )}
-                />
+                <span className="ml-auto flex size-6 shrink-0 items-center justify-center rounded bg-muted">
+                  <ChevronRightIcon
+                    size={16}
+                    className={cn(
+                      "text-foreground transition-transform duration-150",
+                      ucPickerOpen && "rotate-90",
+                    )}
+                  />
+                </span>
               </CollapsibleTrigger>
               <p className="text-hint text-muted-foreground">
                 Browse catalog → schema → table (same pattern as Catalog Explorer). Select catalogs,
