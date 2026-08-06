@@ -88,6 +88,7 @@ import {
   UploadIcon,
   RefreshIcon,
   WrenchSparkleIcon,
+  TrashIcon,
 } from "@/components/icons"
 import { ThumbsUpIcon, ThumbsDownIcon, CopyIcon } from "lucide-react"
 
@@ -209,6 +210,8 @@ export default function GenieCodeProjects() {
   // Threads created this session. Tagged with a projectId when started in/from a
   // project so they show in that project (not Recents).
   const [dynamicThreads, setDynamicThreads] = React.useState<DynamicThread[]>([])
+  // Soft-deleted thread ids — hidden from project detail and the side panel.
+  const [deletedThreadIds, setDeletedThreadIds] = React.useState<string[]>([])
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -349,6 +352,23 @@ export default function GenieCodeProjects() {
     return threadProject(threadId)
   }
 
+  const deleteThread = (threadId: string) => {
+    setDeletedThreadIds((current) =>
+      current.includes(threadId) ? current : [...current, threadId],
+    )
+    setDynamicThreads((current) => current.filter((t) => t.id !== threadId))
+    setThreadAssignments((current) => {
+      if (!Object.prototype.hasOwnProperty.call(current, threadId)) return current
+      const next = { ...current }
+      delete next[threadId]
+      return next
+    })
+    if (activeThreadId === threadId) {
+      handleNewChat()
+      setView("detail")
+    }
+  }
+
   const isEmpty = messages.length === 0 && !isThinking
 
   return (
@@ -366,6 +386,7 @@ export default function GenieCodeProjects() {
           extraThreads={dynamicThreads}
           extraProjects={projects.map(({ id, name }) => ({ id, name }))}
           threadAssignments={threadAssignments}
+          hiddenThreadIds={deletedThreadIds}
           onSelectThread={(id) => {
             setView("chat")
             setActiveThreadId(id)
@@ -402,12 +423,14 @@ export default function GenieCodeProjects() {
             assignedThreadIds={Object.entries(threadAssignments)
               .filter(([, proj]) => proj?.id === selectedProjectId)
               .map(([id]) => id)}
+            deletedThreadIds={deletedThreadIds}
             onOpenThread={(id) => {
               setView("chat")
               setActiveThreadId(id)
               setMessages([])
               setConversationProject(resolveThreadProject(id))
             }}
+            onDeleteThread={deleteThread}
             onStartChat={startProjectChat}
           />
         ) : activeThreadId && messages.length === 0 && !isThinking ? (
@@ -443,12 +466,6 @@ export default function GenieCodeProjects() {
                   </button>
                   <span className="text-muted-foreground/50" aria-hidden>/</span>
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">New chat</span>
-                  <AssignToProjectMenu
-                    projects={projects}
-                    assigned={conversationProject}
-                    onAssign={() => {}}
-                    onCreateProject={() => setView("create-project")}
-                  />
                 </>
               ) : (
                 <>
@@ -621,12 +638,13 @@ function ThreadView({
           </>
         )}
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{title}</span>
-        <AssignToProjectMenu
-          projects={projects}
-          assigned={project}
-          onAssign={(p) => onAssignProject?.(p)}
-          onCreateProject={onCreateProject}
-        />
+        {!project && (
+          <AssignToProjectMenu
+            projects={projects}
+            onAssign={(p) => onAssignProject?.(p)}
+            onCreateProject={onCreateProject}
+          />
+        )}
       </div>
 
       {/* Transcript */}
@@ -1528,6 +1546,7 @@ function CreateProjectView({
   const [assetSearch, setAssetSearch] = React.useState("")
   const [selectedAssets, setSelectedAssets] = React.useState<Set<string>>(new Set())
   const [selectedUc, setSelectedUc] = React.useState<Set<string>>(new Set())
+  const [ucPickerOpen, setUcPickerOpen] = React.useState(false)
   const [attempted, setAttempted] = React.useState(false)
 
   const toggleNode = (node: CreateWsNode, checked: boolean) => {
@@ -1670,25 +1689,36 @@ function CreateProjectView({
             )}
           </div>
 
-          {/* Unity Catalog picker — Databricks-style hierarchy, not a workspace tree */}
-          <div className="flex flex-col gap-2">
+          {/* Unity Catalog picker — collapsed by default; optional like workspace assets */}
+          <Collapsible open={ucPickerOpen} onOpenChange={setUcPickerOpen} className="flex flex-col gap-2">
             <div>
-              <div className="flex items-center gap-2">
+              <CollapsibleTrigger className="group flex w-full items-center gap-2 text-left">
                 <CatalogIcon size={16} className="shrink-0 text-primary" />
-                <Label>Add Unity Catalog assets</Label>
-              </div>
+                <span className="text-sm font-semibold leading-5 text-foreground">
+                  Add Unity Catalog assets (optional)
+                </span>
+                <ChevronRightIcon
+                  size={14}
+                  className={cn(
+                    "ml-auto shrink-0 text-muted-foreground transition-transform duration-150",
+                    ucPickerOpen && "rotate-90",
+                  )}
+                />
+              </CollapsibleTrigger>
               <p className="text-hint text-muted-foreground">
                 Browse catalog → schema → table (same pattern as Catalog Explorer). Select catalogs,
                 schemas, or tables to include in this project.
               </p>
             </div>
-            <CreateUcPicker selected={selectedUc} onToggle={toggleUc} />
+            <CollapsibleContent>
+              <CreateUcPicker selected={selectedUc} onToggle={toggleUc} />
+            </CollapsibleContent>
             {selectedUc.size > 0 && (
               <p className="text-hint text-muted-foreground">
                 {selectedUc.size} UC {selectedUc.size === 1 ? "asset" : "assets"} selected
               </p>
             )}
-          </div>
+          </Collapsible>
         </div>
 
         <div className="flex justify-end gap-2">
@@ -1721,21 +1751,95 @@ const PROJECT_CHAT_IDS: Record<string, string[]> = {
   p4: ["c7", "c8", "c9"],
 }
 
+function ProjectChatRow({
+  title,
+  preview,
+  time,
+  onOpen,
+  onDelete,
+}: {
+  title: string
+  preview?: string
+  time: string
+  onOpen: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      className="group flex cursor-pointer flex-col gap-0.5 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
+    >
+      <div className="flex items-center gap-2">
+        <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{title}</span>
+        <span className="shrink-0 text-hint text-muted-foreground group-hover:hidden group-focus-within:hidden">
+          {time}
+        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Thread options"
+              className="hidden shrink-0 group-hover:inline-flex group-focus-within:inline-flex data-[state=open]:inline-flex"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <OverflowIcon size={16} className="text-muted-foreground" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="w-40"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete()
+              }}
+            >
+              <TrashIcon size={16} />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {preview ? (
+        <span className="truncate pl-6 text-hint text-muted-foreground">{preview}</span>
+      ) : null}
+    </div>
+  )
+}
+
 function ProjectDetail({
   project,
   onBack,
   onOpenThread,
+  onDeleteThread,
   onStartChat,
   extraThreads = [],
   assignedThreadIds = [],
+  deletedThreadIds = [],
 }: {
   project: Project
   onBack: () => void
   onOpenThread?: (id: string) => void
+  onDeleteThread?: (id: string) => void
   onStartChat?: (project: { id: string; name: string }, text: string) => void
   extraThreads?: DynamicThread[]
   /** Built-in chats assigned to this project at runtime */
   assignedThreadIds?: string[]
+  deletedThreadIds?: string[]
 }) {
   const [input, setInput] = React.useState("")
   const [tags, setTags] = React.useState<GenieTag[]>([])
@@ -1746,6 +1850,8 @@ function ProjectDetail({
   const [ucAssets, setUcAssets] = React.useState<string[]>(
     () => project.ucAssets ?? UC_ASSETS.map((a) => a.name),
   )
+
+  const isDeleted = (id: string) => deletedThreadIds.includes(id)
 
   const addUcAssets = (names: string[]) => {
     setUcAssets((current) => {
@@ -1830,61 +1936,49 @@ function ProjectDetail({
           <div className="flex flex-col gap-0.5">
             {/* Session-created chats in this project, newest first */}
             {extraThreads
-              .filter((t) => t.projectId === project.id)
+              .filter((t) => t.projectId === project.id && !isDeleted(t.id))
               .map((t) => (
-                <button
+                <ProjectChatRow
                   key={t.id}
-                  type="button"
-                  onClick={() => onOpenThread?.(t.id)}
-                  className="flex items-center gap-2 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
-                >
-                  <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate text-sm text-foreground">{t.title}</span>
-                  <span className="shrink-0 text-hint text-muted-foreground">now</span>
-                </button>
+                  title={t.title}
+                  time="now"
+                  onOpen={() => onOpenThread?.(t.id)}
+                  onDelete={() => onDeleteThread?.(t.id)}
+                />
               ))}
-            {(PROJECT_CHAT_IDS[project.id] ?? []).map((tid) => {
-              const thread = GENIE_THREADS[tid]
-              if (!thread) return null
-              return (
-                <button
-                  key={tid}
-                  type="button"
-                  onClick={() => onOpenThread?.(tid)}
-                  className="flex flex-col gap-0.5 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
-                >
-                  <div className="flex items-center gap-2">
-                    <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
-                    <span className="flex-1 truncate text-sm text-foreground">{thread.title}</span>
-                    <span className="shrink-0 text-hint text-muted-foreground">{thread.time}</span>
-                  </div>
-                  {thread.preview && (
-                    <span className="truncate pl-6 text-hint text-muted-foreground">{thread.preview}</span>
-                  )}
-                </button>
-              )
-            })}
-            {assignedThreadIds
-              .filter((tid) => !(PROJECT_CHAT_IDS[project.id] ?? []).includes(tid))
+            {(PROJECT_CHAT_IDS[project.id] ?? [])
+              .filter((tid) => !isDeleted(tid))
               .map((tid) => {
                 const thread = GENIE_THREADS[tid]
                 if (!thread) return null
                 return (
-                  <button
+                  <ProjectChatRow
                     key={tid}
-                    type="button"
-                    onClick={() => onOpenThread?.(tid)}
-                    className="flex flex-col gap-0.5 rounded px-2 py-2 text-left transition-colors hover:bg-muted"
-                  >
-                    <div className="flex items-center gap-2">
-                      <SpeechBubbleIcon size={16} className="shrink-0 text-muted-foreground" />
-                      <span className="flex-1 truncate text-sm text-foreground">{thread.title}</span>
-                      <span className="shrink-0 text-hint text-muted-foreground">{thread.time}</span>
-                    </div>
-                    {thread.preview && (
-                      <span className="truncate pl-6 text-hint text-muted-foreground">{thread.preview}</span>
-                    )}
-                  </button>
+                    title={thread.title}
+                    preview={thread.preview}
+                    time={thread.time}
+                    onOpen={() => onOpenThread?.(tid)}
+                    onDelete={() => onDeleteThread?.(tid)}
+                  />
+                )
+              })}
+            {assignedThreadIds
+              .filter(
+                (tid) =>
+                  !isDeleted(tid) && !(PROJECT_CHAT_IDS[project.id] ?? []).includes(tid),
+              )
+              .map((tid) => {
+                const thread = GENIE_THREADS[tid]
+                if (!thread) return null
+                return (
+                  <ProjectChatRow
+                    key={tid}
+                    title={thread.title}
+                    preview={thread.preview}
+                    time={thread.time}
+                    onOpen={() => onOpenThread?.(tid)}
+                    onDelete={() => onDeleteThread?.(tid)}
+                  />
                 )
               })}
           </div>

@@ -166,6 +166,8 @@ interface GenieThreadsPanelProps {
   extraProjects?: { id: string; name: string }[]
   /** Runtime thread → project assignments. `null` = explicitly unassigned. */
   threadAssignments?: Record<string, { id: string; name: string } | null>
+  /** Thread ids hidden after delete — omitted from Projects and Recents. */
+  hiddenThreadIds?: string[]
   onSelectThread?: (id: string) => void
   onNewChat?: () => void
   /** Fired when an action row (schedules, customizations, projects, inbox) is clicked */
@@ -190,6 +192,7 @@ export function GenieThreadsPanel({
   extraThreads = [],
   extraProjects = [],
   threadAssignments = {},
+  hiddenThreadIds = [],
   onSelectThread,
   onNewChat,
   onSelectAction,
@@ -201,6 +204,7 @@ export function GenieThreadsPanel({
   activeStatus,
   className,
 }: GenieThreadsPanelProps) {
+  const isHidden = (id: string) => hiddenThreadIds.includes(id)
   const [search, setSearch] = React.useState("")
   // Group headers (Scheduled / Chats) are collapsible. Empty groups (Scheduled)
   // start collapsed; the rest start expanded.
@@ -365,14 +369,21 @@ export function GenieThreadsPanel({
             {!collapsed.Projects &&
               panelProjects.map((project) => {
                 const projectExtras = extraThreads.filter(
-                  (t) => (t.projectId ?? projectIdForThread(t.id)) === project.id,
+                  (t) =>
+                    !isHidden(t.id) &&
+                    (t.projectId ?? projectIdForThread(t.id)) === project.id,
                 )
                 const assignedBuiltIns = Object.entries(threadAssignments)
                   .filter(([, proj]) => proj?.id === project.id)
                   .map(([tid]) => tid)
-                  .filter((tid) => GENIE_THREADS[tid] && !project.threadIds.includes(tid))
+                  .filter(
+                    (tid) =>
+                      !isHidden(tid) &&
+                      GENIE_THREADS[tid] &&
+                      !project.threadIds.includes(tid),
+                  )
                 const builtInIds = project.threadIds.filter(
-                  (tid) => projectIdForThread(tid) === project.id,
+                  (tid) => !isHidden(tid) && projectIdForThread(tid) === project.id,
                 )
                 const hasThreads =
                   projectExtras.length > 0 || builtInIds.length > 0 || assignedBuiltIns.length > 0
@@ -481,12 +492,15 @@ export function GenieThreadsPanel({
           const recentsExtras: Thread[] =
             group.label === "Recents"
               ? extraThreads
-                  .filter((t) => !(t.projectId ?? projectIdForThread(t.id)))
+                  .filter(
+                    (t) =>
+                      !isHidden(t.id) && !(t.projectId ?? projectIdForThread(t.id)),
+                  )
                   .map((t) => ({ id: t.id, title: t.title, preview: t.preview ?? "", time: "now" }))
               : []
           const groupThreads = [
             ...recentsExtras,
-            ...group.threads.filter((t) => !projectIdForThread(t.id)),
+            ...group.threads.filter((t) => !isHidden(t.id) && !projectIdForThread(t.id)),
           ]
           const threads = search
             ? groupThreads.filter(
