@@ -283,6 +283,7 @@ export function GenieCodePanel({ open, onClose, className }: GenieCodePanelProps
                       onTagRemove={(id) => setTags((prev) => prev.filter((t) => t.id !== id))}
                       placeholder="Ask Genie Code..."
                       projectLabel={true}
+                      projectQuiet
                       onChooseProject={() => setProjectPopoverOpen((v) => !v)}
                     />
                   </div>

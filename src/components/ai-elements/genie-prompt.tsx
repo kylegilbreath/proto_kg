@@ -58,6 +58,8 @@ export interface GeniePromptProps {
    *  string to show the selected project name, or true for the default label. */
   projectLabel?: string | boolean;
   onChooseProject?: () => void;
+  /** When unset, render a quiet icon-only folder (no "Add to project" text). */
+  projectQuiet?: boolean;
   placeholder?: string;
   className?: string;
 }
@@ -184,6 +186,7 @@ export function GeniePrompt({
   showAtButton = false,
   projectLabel = false,
   onChooseProject,
+  projectQuiet = false,
   placeholder,
   className,
 }: GeniePromptProps) {
@@ -280,23 +283,35 @@ export function GeniePrompt({
 
   const hasProject = typeof projectLabel === "string";
   const canChooseProject = typeof onChooseProject === "function";
+  // Quiet empty state: icon-only folder — used in the Genie Code sidebar where
+  // "No project" is the default and a text label is extra noise.
+  const quietEmpty = projectQuiet && !hasProject;
   const projectButton = canChooseProject ? (
     <button
       type="button"
       onClick={onChooseProject}
+      aria-label={hasProject ? `Project: ${projectLabel}` : "Add to project"}
+      title={hasProject ? undefined : "Add to project"}
       // Padded ghost button, matching the workspace selector in the top nav.
-      // Unset: muted (gray) folder + "Add to project" label. Set: colored
+      // Unset: muted folder (+ optional "Add to project" label). Set: colored
       // folder + the project name in foreground.
-      className="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-sm transition-colors hover:bg-[var(--action-default-bg-hover)]"
+      className={cn(
+        "flex h-7 shrink-0 items-center rounded text-sm transition-colors hover:bg-[var(--action-default-bg-hover)]",
+        quietEmpty ? "justify-center px-1.5" : "gap-1.5 px-2",
+      )}
     >
       <FolderIcon
         size={16}
         className={cn("shrink-0", hasProject ? "text-[var(--warning)]" : "text-muted-foreground")}
       />
-      <span className={cn("whitespace-nowrap", hasProject ? "text-foreground" : "text-muted-foreground")}>
-        {hasProject ? projectLabel : "Add to project"}
-      </span>
-      <ChevronDownIcon size={16} className="shrink-0 text-muted-foreground" />
+      {!quietEmpty && (
+        <>
+          <span className={cn("whitespace-nowrap", hasProject ? "text-foreground" : "text-muted-foreground")}>
+            {hasProject ? projectLabel : "Add to project"}
+          </span>
+          <ChevronDownIcon size={16} className="shrink-0 text-muted-foreground" />
+        </>
+      )}
     </button>
   ) : hasProject ? (
     <div
