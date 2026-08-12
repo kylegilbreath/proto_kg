@@ -914,7 +914,7 @@ figma.connect(
             label: "Home",
             defaultExpanded: true,
             children: [
-              { id: "projects", label: "Projects" },
+              { id: "projects", label: "Spaces" },
               { id: "drafts",   label: "Drafts" },
             ],
           },
@@ -968,7 +968,7 @@ figma.connect(
             label: "Workspace",
             defaultExpanded: true,
             children: [
-              { id: "projects", label: "Projects" },
+              { id: "projects", label: "Spaces" },
             ],
           },
         ]}
@@ -1341,7 +1341,7 @@ figma.connect(
             id: "workspace",
             label: "Workspace",
             defaultExpanded: true,
-            children: [{ id: "projects", label: "Projects" }],
+            children: [{ id: "projects", label: "Spaces" }],
           },
         ]}
         selectedId="projects"
