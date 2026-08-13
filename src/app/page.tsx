@@ -29,7 +29,7 @@ type Prototype = {
 
 const PROTOTYPES: Prototype[] = [
   {
-    name: "Genie Code Projects",
+    name: "Genie Code Spaces",
     desc: "Describe what this prototype explores.",
     href: "/genie-code-projects",
     badge: "WIP",

@@ -1,4 +1,4 @@
-// ─── Genie Code Projects ──────────────────────────────────────────────────────
+// ─── Genie Code Spaces ──────────────────────────────────────────────────────
 // Full-screen Genie Code experience: threads panel + chat area + workspace canvas,
 // all inside one card. Reached from the "Genie Code" left-nav item.
 //
@@ -727,12 +727,12 @@ function AssignToProjectMenu({
       <PopoverTrigger asChild>
         <Button variant="ghost" size="sm" className="shrink-0 gap-1 text-foreground">
           <FolderIcon size={16} className="text-[var(--warning)]" />
-          Add to project
+          Add to space
           <ChevronDownIcon size={14} className="text-muted-foreground" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[280px] p-1">
-        <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
+        <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to space</p>
         {projects.map((p) => (
           <button
             key={p.id}
@@ -757,7 +757,7 @@ function AssignToProjectMenu({
           className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
         >
           <PlusIcon size={16} className="shrink-0 text-muted-foreground" />
-          <span>Create new project</span>
+          <span>Create new space</span>
         </button>
       </PopoverContent>
     </Popover>
@@ -816,7 +816,7 @@ function EmptyState({
           </div>
         </PopoverAnchor>
         <PopoverContent align="start" className="w-[280px] p-1">
-          <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
+          <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to space</p>
           {projects.map((p) => (
             <button
               key={p.id}
@@ -838,7 +838,7 @@ function EmptyState({
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
           >
             <PlusIcon size={16} className="shrink-0 text-muted-foreground" />
-            <span>Create new project</span>
+            <span>Create new space</span>
           </button>
         </PopoverContent>
       </Popover>
@@ -1001,7 +1001,7 @@ const PROJECTS: Project[] = [
 ]
 
 const PROJECT_TABS = [
-  { value: "yours", label: "Your projects" },
+  { value: "yours", label: "Your spaces" },
   { value: "shared", label: "Shared with you" },
 ] as const
 
@@ -1074,10 +1074,10 @@ function ProjectsView({
       <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-6">
         {/* Header */}
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-[22px] font-semibold leading-7 text-foreground">Projects</h2>
+          <h2 className="text-[22px] font-semibold leading-7 text-foreground">Spaces</h2>
           <Button size="sm" className="shrink-0 gap-1" onClick={onCreateProject}>
             <PlusIcon size={16} />
-            New project
+            New space
           </Button>
         </div>
 
@@ -1097,7 +1097,7 @@ function ProjectsView({
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search projects"
+              placeholder="Search spaces"
               className="h-8 w-48 pl-8"
             />
           </div>
@@ -1106,7 +1106,7 @@ function ProjectsView({
         {/* Card grid */}
         {projects.length === 0 ? (
           <div className="rounded-md border border-dashed border-border px-4 py-12 text-center">
-            <p className="text-sm text-muted-foreground">No projects here yet.</p>
+            <p className="text-sm text-muted-foreground">No spaces here yet.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1125,7 +1125,7 @@ function ProjectsView({
   )
 }
 
-// ─── Create project ─────────────────────────────────────────────────────────────
+// ─── Create space ─────────────────────────────────────────────────────────────
 
 type CreateWsNode = {
   id: string
@@ -1594,13 +1594,13 @@ function CreateProjectView({
           className="w-fit gap-1 px-0 text-muted-foreground"
         >
           <ArrowLeftIcon size={16} />
-          Projects
+          Spaces
         </Button>
 
         <div className="flex flex-col gap-1">
-          <h2 className="text-xl font-semibold leading-7 text-foreground">Create a project</h2>
+          <h2 className="text-xl font-semibold leading-7 text-foreground">Create a space</h2>
           <p className="text-sm text-muted-foreground">
-            A project groups notebooks, dashboards, threads, and Unity Catalog assets.
+            A space groups notebooks, dashboards, threads, and Unity Catalog assets.
           </p>
         </div>
 
@@ -1618,7 +1618,7 @@ function CreateProjectView({
             />
             {attempted && !name.trim() && (
               <p id="project-name-error" className="text-hint text-destructive">
-                Enter a project name.
+                Enter a space name.
               </p>
             )}
           </div>
@@ -1709,7 +1709,7 @@ function CreateProjectView({
               </CollapsibleTrigger>
               <p className="text-hint text-muted-foreground">
                 Browse catalog → schema → table (same pattern as Catalog Explorer). Select catalogs,
-                schemas, or tables to include in this project.
+                schemas, or tables to include in this space.
               </p>
             </div>
             <CollapsibleContent>
@@ -1728,7 +1728,7 @@ function CreateProjectView({
             Cancel
           </Button>
           <Button type="submit" size="sm">
-            Create project
+            Create space
           </Button>
         </div>
       </form>
@@ -1875,7 +1875,7 @@ function ProjectDetail({
           className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeftIcon size={16} />
-          All projects
+          All spaces
         </button>
 
         {/* Title row */}
@@ -2078,7 +2078,7 @@ function ProjectDetail({
         {tab === "instructions" && (
           <div className="flex flex-col gap-4">
             <p className="max-w-[560px] text-sm text-muted-foreground">
-              Instructions and agent memories tailor how Genie responds in this project — preferred tables,
+              Instructions and agent memories tailor how Genie responds in this space — preferred tables,
               response tone, what you&apos;re working on.{" "}
               <a href="#" className="text-primary hover:underline">Learn more</a>
             </p>
@@ -2192,7 +2192,7 @@ function AddAssetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>Add assets to project</DialogTitle>
+          <DialogTitle>Add assets to space</DialogTitle>
           <DialogDescription>
             Browse your workspace and check folders or individual items — folder checks pull in everything inside.
           </DialogDescription>
@@ -2285,7 +2285,7 @@ function UnityCatalogDialog({
         <DialogHeader>
           <DialogTitle>Add from Unity Catalog</DialogTitle>
           <DialogDescription>
-            Browse catalogs, schemas, and tables — pin what this project should reference in
+            Browse catalogs, schemas, and tables — pin what this space should reference in
             instructions.
           </DialogDescription>
         </DialogHeader>
@@ -2442,7 +2442,7 @@ function ProjectSkillsPanel({ projectId }: { projectId: string }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <p className="max-w-[560px] text-sm text-muted-foreground">
-          Skills are reusable workflows Genie can run in this project — write once, invoke from any chat.
+          Skills are reusable workflows Genie can run in this space — write once, invoke from any chat.
         </p>
         <Button size="sm" className="shrink-0 gap-1">
           <PlusIcon size={16} />
@@ -2455,7 +2455,7 @@ function ProjectSkillsPanel({ projectId }: { projectId: string }) {
           <DbIcon icon={WrenchSparkleIcon} size={24} className="mx-auto text-muted-foreground/50" />
           <p className="mt-3 text-sm font-semibold text-foreground">No skills yet</p>
           <p className="mt-1 text-hint text-muted-foreground">
-            Create a skill to capture a repeatable workflow for this project.
+            Create a skill to capture a repeatable workflow for this space.
           </p>
         </div>
       ) : (
@@ -2524,8 +2524,8 @@ const INSTRUCTION_RULES = [
 ]
 
 const AGENT_MEMORIES = [
-  "NFL combine project: training table is kyle_gilbreath.nfl_combine_data.2025_nfl_combine (RAS, Ranking, Production as targets); scoring table is kyle_gilbreath.nfl_combine_data.2026_nfl_combine. Predicted rankings saved to kyle_gilbreath.nfl_combine_data.2026_predicted_rankings.",
-  "MLflow experiment for this project lives at /Users/kyle.gilbreath@databricks.com/NFL Combine RAS Predictor.",
+  "NFL combine space: training table is kyle_gilbreath.nfl_combine_data.2025_nfl_combine (RAS, Ranking, Production as targets); scoring table is kyle_gilbreath.nfl_combine_data.2026_nfl_combine. Predicted rankings saved to kyle_gilbreath.nfl_combine_data.2026_predicted_rankings.",
+  "MLflow experiment for this space lives at /Users/kyle.gilbreath@databricks.com/NFL Combine RAS Predictor.",
   "ML notebook: NFL Combine ML — Predict Top 2027 Prospects. RandomForestRegressor trained on RAS target, MAE ~0.875, R² ~0.559. Top 2026 prospect: Kenyon Sadiq (Oregon, 9.87 predicted RAS).",
   "NFL fantasy football: strength-of-schedule table saved at kyle_gilbreath.nfl_fantasy_football.strength_of_schedule, one row per team and position, where schedule_percentile is 0–1 (higher means an easier schedule).",
 ]
@@ -2548,7 +2548,7 @@ function InstructionsDoc({
   return (
     <div className="rounded-md border border-border">
       <div className="flex items-center gap-2 border-b border-border bg-secondary px-4 py-2">
-        <span className="flex-1 text-sm font-semibold text-foreground">Project instructions</span>
+        <span className="flex-1 text-sm font-semibold text-foreground">Space instructions</span>
         {editing ? (
           <>
             <Button
@@ -2674,9 +2674,9 @@ function Composer({
   setTags: React.Dispatch<React.SetStateAction<GenieTag[]>>
   onSubmit: (v: string) => void
   className?: string
-  /** Show the "Choose project" selector — only before a chat has started */
+  /** Show the "Choose space" selector — only before a chat has started */
   showProject?: boolean
-  /** Selected project name shown on the selector (defaults to "Choose project") */
+  /** Selected project name shown on the selector (defaults to "Choose space") */
   projectName?: string
   onChooseProject?: () => void
 }) {

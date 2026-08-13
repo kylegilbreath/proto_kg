@@ -54,11 +54,11 @@ export interface GeniePromptProps {
   modelName?: string;
   /** Show an "@" mention button next to "+" in the chat action bar */
   showAtButton?: boolean;
-  /** Show a "Choose project" folder selector in the chat action bar. Pass a
+  /** Show a "Choose space" folder selector in the chat action bar. Pass a
    *  string to show the selected project name, or true for the default label. */
   projectLabel?: string | boolean;
   onChooseProject?: () => void;
-  /** When unset, render a quiet icon-only folder (no "Add to project" text). */
+  /** When unset, render a quiet icon-only folder (no "Add to space" text). */
   projectQuiet?: boolean;
   placeholder?: string;
   className?: string;
@@ -290,10 +290,10 @@ export function GeniePrompt({
     <button
       type="button"
       onClick={onChooseProject}
-      aria-label={hasProject ? `Project: ${projectLabel}` : "Add to project"}
-      title={hasProject ? undefined : "Add to project"}
+      aria-label={hasProject ? `Space: ${projectLabel}` : "Add to space"}
+      title={hasProject ? undefined : "Add to space"}
       // Padded ghost button, matching the workspace selector in the top nav.
-      // Unset: muted folder (+ optional "Add to project" label). Set: colored
+      // Unset: muted folder (+ optional "Add to space" label). Set: colored
       // folder + the project name in foreground.
       className={cn(
         "flex h-7 shrink-0 items-center rounded text-sm transition-colors hover:bg-[var(--action-default-bg-hover)]",
@@ -307,7 +307,7 @@ export function GeniePrompt({
       {!quietEmpty && (
         <>
           <span className={cn("whitespace-nowrap", hasProject ? "text-foreground" : "text-muted-foreground")}>
-            {hasProject ? projectLabel : "Add to project"}
+            {hasProject ? projectLabel : "Add to space"}
           </span>
           <ChevronDownIcon size={16} className="shrink-0 text-muted-foreground" />
         </>

@@ -129,7 +129,7 @@ export function GenieCodePanel({ open, onClose, className }: GenieCodePanelProps
   const createProject = () => {
     const project: PanelProject = {
       id: `panel-p-${++projectCounter}`,
-      name: `Untitled project ${projectCounter}`,
+      name: `Untitled space ${projectCounter}`,
     }
     setProjects((current) => [project, ...current])
     setAssignedProject(project)
@@ -252,7 +252,7 @@ export function GenieCodePanel({ open, onClose, className }: GenieCodePanelProps
             )}
           </div>
 
-          {/* Compose area — Add to project lives on the prompt action bar */}
+          {/* Compose area — Add to space lives on the prompt action bar */}
           <div className="shrink-0 p-3">
             {assignedProject ? (
               <div className="w-full">
@@ -289,7 +289,7 @@ export function GenieCodePanel({ open, onClose, className }: GenieCodePanelProps
                   </div>
                 </PopoverAnchor>
                 <PopoverContent align="start" side="top" className="w-[280px] p-1">
-                  <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to project</p>
+                  <p className="px-2 py-1.5 text-hint text-muted-foreground">Add to space</p>
                   {projects.map((p) => (
                     <button
                       key={p.id}
@@ -311,7 +311,7 @@ export function GenieCodePanel({ open, onClose, className }: GenieCodePanelProps
                     className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
                   >
                     <PlusIcon size={16} className="shrink-0 text-muted-foreground" />
-                    <span>Create new project</span>
+                    <span>Create new space</span>
                   </button>
                 </PopoverContent>
               </Popover>

@@ -325,7 +325,7 @@ export function GenieThreadsPanel({
                   activeAction === "projects" ? "text-primary font-semibold" : "text-muted-foreground",
                 )}
               >
-                Projects
+                Spaces
               </span>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -333,7 +333,7 @@ export function GenieThreadsPanel({
                     type="button"
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="New project"
+                    aria-label="New space"
                     onClick={(e) => {
                       e.stopPropagation()
                       onCreateProject?.()
@@ -343,15 +343,15 @@ export function GenieThreadsPanel({
                     <PlusIcon size={14} className="text-muted-foreground" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>New project</TooltipContent>
+                <TooltipContent>New space</TooltipContent>
               </Tooltip>
               <button
                 type="button"
-                aria-label={collapsed.Projects ? "Expand Projects" : "Collapse Projects"}
-                aria-expanded={!collapsed.Projects}
+                aria-label={collapsed.Spaces ? "Expand Spaces" : "Collapse Spaces"}
+                aria-expanded={!collapsed.Spaces}
                 onClick={(e) => {
                   e.stopPropagation()
-                  toggleGroup("Projects")
+                  toggleGroup("Spaces")
                 }}
                 className="flex size-4 shrink-0 items-center justify-center rounded"
               >
@@ -359,14 +359,14 @@ export function GenieThreadsPanel({
                   size={12}
                   className={cn(
                     "shrink-0 text-muted-foreground transition-all duration-150",
-                    collapsed.Projects
+                    collapsed.Spaces
                       ? "opacity-100"
                       : "rotate-90 opacity-0 group-hover/header:opacity-100",
                   )}
                 />
               </button>
             </div>
-            {!collapsed.Projects &&
+            {!collapsed.Spaces &&
               panelProjects.map((project) => {
                 const projectExtras = extraThreads.filter(
                   (t) =>
