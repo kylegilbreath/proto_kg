@@ -58,6 +58,8 @@ type PlaygroundProps = {
   showFailure: boolean
   // Show the running "(N completed)" count in the focus "Thinking…" header.
   showCompletedCount: boolean
+  // Collapse consecutive same-title tool calls into one "×N" expandable row.
+  groupRepeatedTools: boolean
 }
 
 const DEFAULT_PROPS: PlaygroundProps = {
@@ -67,6 +69,7 @@ const DEFAULT_PROPS: PlaygroundProps = {
   showSuccess: true,
   showFailure: true,
   showCompletedCount: true,
+  groupRepeatedTools: true,
 }
 
 // ─── Density ────────────────────────────────────────────────────────────────
@@ -152,7 +155,7 @@ const THREAD: ThreadItem[] = [
     children: [
       { kind: "tool", title: "Created New Notebook 2026-08-27", asset: NB, status: "success" },
       { kind: "thoughts", text: "I'll add cells for schema, volume, temporal coverage, fare/distance distributions, and top routes." },
-      { kind: "tool", title: "Edited", asset: NB, status: "success" },
+      { kind: "tool", title: "Edited", asset: NB, status: "failure" },
       { kind: "tool", title: "Edited", asset: NB, status: "success" },
       { kind: "tool", title: "Edited", asset: NB, status: "success" },
     ],
@@ -510,6 +513,91 @@ function ThoughtsBlock({ text }: { text: string }) {
   )
 }
 
+// ─── Tool run group ───────────────────────────────────────────────────────────
+// Collapses a run of consecutive same-title tool calls into one "title ×N ›" row
+// (gated by props.groupRepeatedTools). Collapsed shows the run's title, the count,
+// and the LAST call's status glyph. Expanded lists the individual calls in order,
+// each a normal ToolAction. Only used for runs of length ≥ 2.
+
+function ToolRunGroup({
+  parent,
+  indices,
+  steps,
+  props,
+}: {
+  parent: number
+  indices: number[]
+  steps: StepChild[]
+  props: PlaygroundProps
+}) {
+  const reveal = useReveal()
+  const [open, setOpen] = useState(false)
+
+  const first = steps[indices[0]]
+  const title = first.kind === "tool" ? first.title : ""
+  const lastIdx = indices[indices.length - 1]
+  const last = steps[lastIdx]
+  // "Last wins": the row glyph is the last call's effective status.
+  const lastStatus: ToolStatus =
+    last.kind === "tool"
+      ? isSettled(reveal, childKey(parent, lastIdx))
+        ? last.status
+        : "running"
+      : "success"
+  const showGlyph = glyphVisible(lastStatus, props)
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <Button
+        variant="ghost"
+        onClick={() => setOpen((o) => !o)}
+        className="h-auto w-full justify-start gap-2 px-0 py-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
+      >
+        <span className="min-w-0 truncate">{title}</span>
+        <span className="shrink-0 text-muted-foreground">×{indices.length}</span>
+        <ChevronRightIcon size={14} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+        {showGlyph && (
+          <span className="ml-auto shrink-0">
+            <StatusGlyph status={lastStatus} size={16} />
+          </span>
+        )}
+      </Button>
+      {open && (
+        <div className="ml-2 flex flex-col gap-2.5 border-l border-border pl-3">
+          {indices.map((c) => (
+            <ThreadItemView key={c} item={steps[c]} revealKey={childKey(parent, c)} props={props} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Segment a list of child indices into runs: each entry is either a single index
+// (non-tool, or a lone tool) or a run of ≥2 consecutive same-title tools.
+function segmentSteps(indices: number[], steps: StepChild[]): number[][] {
+  const segments: number[][] = []
+  let run: number[] = []
+  const flush = () => {
+    if (run.length) segments.push(run)
+    run = []
+  }
+  for (const c of indices) {
+    const item = steps[c]
+    if (item.kind === "tool" && run.length && steps[run[0]].kind === "tool") {
+      const prev = steps[run[0]] as Extract<StepChild, { kind: "tool" }>
+      if (prev.title === item.title) {
+        run.push(c)
+        continue
+      }
+    }
+    flush()
+    run = [c]
+  }
+  flush()
+  return segments
+}
+
 // ─── Step group ───────────────────────────────────────────────────────────────
 // Owns the thoughts/tools it hides. `parent` is the group's THREAD index.
 //
@@ -553,13 +641,30 @@ function StepGroup({
 
   // Render a set of child indices as an indented step list (plain helper, not a
   // component — avoids remounting the children and resetting their local state).
-  const stepList = (indices: number[]) => (
-    <div className="ml-2 flex flex-col gap-2.5 border-l border-border pl-3">
-      {indices.map((c) => (
-        <ThreadItemView key={c} item={steps[c]} revealKey={childKey(parent, c)} props={props} focus={focus} />
-      ))}
-    </div>
-  )
+  // When grouping is on, consecutive same-title tool runs (≥2) collapse into a
+  // ToolRunGroup; everything else renders as an individual item.
+  const stepList = (indices: number[]) => {
+    const segments = props.groupRepeatedTools
+      ? segmentSteps(indices, steps)
+      : indices.map((c) => [c])
+    return (
+      <div className="ml-2 flex flex-col gap-2.5 border-l border-border pl-3">
+        {segments.map((seg) =>
+          seg.length > 1 ? (
+            <ToolRunGroup key={seg[0]} parent={parent} indices={seg} steps={steps} props={props} />
+          ) : (
+            <ThreadItemView
+              key={seg[0]}
+              item={steps[seg[0]]}
+              revealKey={childKey(parent, seg[0])}
+              props={props}
+              focus={focus}
+            />
+          )
+        )}
+      </div>
+    )
+  }
 
   // ── Streaming ──────────────────────────────────────────────────────────────
   if (streaming) {
@@ -813,9 +918,13 @@ function OptionCard({
       </div>
       <div className="flex min-h-0 flex-1 flex-col rounded-md border border-border bg-background p-4">
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <Thread density={density} props={props} />
+          <div className="mx-auto w-full max-w-[680px]">
+            <Thread density={density} props={props} />
+          </div>
         </div>
-        <ThreadComposer />
+        <div className="mx-auto w-full max-w-[680px]">
+          <ThreadComposer />
+        </div>
       </div>
     </div>
   )
@@ -917,6 +1026,12 @@ function PlaygroundRail({
           label="# of completed steps"
           checked={props.showCompletedCount}
           onChange={(v) => setProps({ ...props, showCompletedCount: v })}
+        />
+        <ToggleRow
+          id="group-repeated-tools"
+          label="Group repeated tools"
+          checked={props.groupRepeatedTools}
+          onChange={(v) => setProps({ ...props, groupRepeatedTools: v })}
         />
       </div>
     </aside>
