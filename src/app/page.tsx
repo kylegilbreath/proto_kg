@@ -34,6 +34,12 @@ const PROTOTYPES: Prototype[] = [
     href: "/genie-code-projects",
     badge: "WIP",
   },
+  {
+    name: "Genie thread variants",
+    desc: "Progress & step-display treatments for a Genie code thread, side by side.",
+    href: "/genie-thread-variants",
+    badge: "WIP",
+  },
   // Add more prototypes here — one object per prototype.
   // { name: "Prototype B", desc: "…", href: "/prototype-b" },
 ]
