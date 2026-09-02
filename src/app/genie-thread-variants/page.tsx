@@ -11,10 +11,10 @@
 //       - Show status glyphs   — whether the trailing ✓/⚠/spinner shows
 //   • Right = Option cards, differing by PROGRESS DENSITY (intrinsic per option,
 //     never driven by the rail; each owns its own local expand/collapse state):
-//       - A Full      every step, flat transcript
-//       - B Phased    4 semantic collapsible phases
-//       - C Summary   one live line, expand for the full transcript
-//     All three render the same faithful EDA thread so the tool styling reads
+//       - A Full   every step streams visibly, flat transcript
+//       - B Focus  same structure, but a streaming group shows only the single
+//                  live step; finished steps roll up behind "Thinking… (N)"
+//     Both render the same faithful EDA thread so the tool styling reads
 //     comparably across densities.
 //
 // Linked from the Prototype Hub home page (PROTOTYPES array in src/app/page.tsx).
@@ -56,6 +56,8 @@ type PlaygroundProps = {
   showStatus: boolean
   showSuccess: boolean
   showFailure: boolean
+  // Show the running "(N completed)" count in the focus "Thinking…" header.
+  showCompletedCount: boolean
 }
 
 const DEFAULT_PROPS: PlaygroundProps = {
@@ -64,19 +66,27 @@ const DEFAULT_PROPS: PlaygroundProps = {
   showStatus: true,
   showSuccess: true,
   showFailure: true,
+  showCompletedCount: true,
 }
 
 // ─── Density ────────────────────────────────────────────────────────────────
 // Intrinsic to each option card. Never driven by the playground rail.
 
-type Density = "full" | "phased" | "summary"
+// full  = A: every step streams visibly, flat transcript.
+// focus = B: same flat structure, but a streaming group shows only the single
+//            live step; completed steps roll up behind an expandable "Thinking…"
+//            header with a running completed-count.
+type Density = "full" | "focus"
 
 type OptionDef = { density: Density; label: string; caption: string }
 
 const OPTIONS: OptionDef[] = [
-  { density: "full", label: "Option A", caption: "Full — every step, flat" },
-  { density: "phased", label: "Option B", caption: "Phased — 4 collapsible phases" },
-  { density: "summary", label: "Option C", caption: "Summary — one line, expand for detail" },
+  { density: "full", label: "Option A", caption: "Full — every step streams, flat" },
+  {
+    density: "focus",
+    label: "Option B",
+    caption: "One at a time — only the live step shows; finished steps roll up",
+  },
 ]
 
 // ─── Thread model ─────────────────────────────────────────────────────────────
@@ -118,7 +128,10 @@ const THREAD: ThreadItem[] = [
   {
     kind: "stepGroup",
     children: [
-      { kind: "thoughts", text: "The user wants to perform exploratory data analysis on the samples.nyctaxi.trips table." },
+      {
+        kind: "thoughts",
+        text: "The user wants to perform exploratory data analysis on the samples.nyctaxi.trips table. Before I touch the data I should check whether there's a relevant skill that governs how EDA on a trips table ought to be done — column conventions, date scoping, and any performance caveats for large Delta shares. Let me read the available skills first so I follow the established pattern rather than improvising queries that might time out or miss required temporal validation.",
+      },
       { kind: "tool", title: "Read skill", status: "success" },
       { kind: "thoughts", text: "The skill says I need to load temporal-validation.md since EDA on a trips table needs date scoping." },
       { kind: "tool", title: "Loaded skill details", status: "success" },
@@ -171,22 +184,6 @@ const THREAD: ThreadItem[] = [
   },
 ]
 
-// ─── Phases (Option B) ────────────────────────────────────────────────────────
-// Hand-authored semantic grouping of THREAD. runHeader (0) + userPrompt (1) sit
-// above the phases; each phase is a [start, end] inclusive index range into
-// THREAD. `steps` is the human-facing count shown in the header.
-
-const PHASE_INTRO_COUNT = 2 // runHeader + userPrompt render above phases
-
-type Phase = { label: string; start: number; end: number; steps: number }
-
-const PHASES: Phase[] = [
-  { label: "Understanding the table", start: 2, end: 3, steps: 10 },
-  { label: "Building the EDA notebook", start: 4, end: 5, steps: 5 },
-  { label: "Running analysis cells", start: 6, end: 9, steps: 4 },
-  { label: "Finishing up", start: 10, end: 11, steps: 2 },
-]
-
 // ─── Reveal timeline ──────────────────────────────────────────────────────────
 // Rerun replays the thread as a live stream. Every revealable atom gets a global
 // reveal index in playback order: each top-level THREAD item is an atom, and a
@@ -220,7 +217,7 @@ const REVEAL_INDEX: Record<string, number> = (() => {
 
 // Total beats = every atom + a trailing settle beat so the last tool flips.
 const TOTAL_BEATS = Object.keys(REVEAL_INDEX).length + 2
-const BEAT_MS = 600
+const BEAT_MS = 1100
 
 type RevealState = {
   active: boolean // a replay is currently playing (or was just played)
@@ -514,63 +511,98 @@ function ThoughtsBlock({ text }: { text: string }) {
 }
 
 // ─── Step group ───────────────────────────────────────────────────────────────
-// Owns the thoughts/tools it hides. Collapsed → "N steps ▸". Expanded → "N steps
-// ▾" + children rendered inline, indented under a hairline. Default collapsed.
-// During a replay it auto-expands while its children stream, then collapses once
-// the last child settles (user can still re-expand). `parent` is the group's
-// THREAD index, used to derive each child's reveal key.
+// Owns the thoughts/tools it hides. `parent` is the group's THREAD index.
+//
+// Settled/idle (both densities): collapses to "Thought process (N steps) ▸",
+// expandable to all steps.
+//
+// Streaming header (both densities): a "Thinking… (N)" row with the Genie loader,
+// N = completed steps so far, running up as steps settle. Clickable to expand.
+//
+// Streaming body:
+//   • full  (A) — auto-expands and shows ALL revealed steps.
+//   • focus (B) — shows only the single LIVE step (the newest revealed child);
+//     completed steps are hidden and roll up behind the header, appearing above
+//     the live step only when the header is expanded.
 
 function StepGroup({
   parent,
   steps,
   props,
+  focus = false,
 }: {
   parent: number
   steps: StepChild[]
   props: PlaygroundProps
+  focus?: boolean
 }) {
   const reveal = useReveal()
   const [userOpen, setUserOpen] = useState(false)
 
-  // "Thinking…" from the moment the group appears until its last child settles —
-  // never show the "N steps" count while still generating (would flash the count
-  // for the beat between the header revealing and the first child).
   const lastChildKey = childKey(parent, steps.length - 1)
   const streaming = reveal.active && !isSettled(reveal, lastChildKey)
 
-  // Auto-open while streaming; otherwise honor the user's toggle.
-  const open = streaming || userOpen
+  // Indices of revealed children, and how many have settled (the running count).
+  const revealed = steps.map((_, c) => c).filter((c) => isVisible(reveal, childKey(parent, c)))
+  const completedCount = steps.filter((_, c) => isSettled(reveal, childKey(parent, c))).length
+  const liveIdx = revealed.length ? revealed[revealed.length - 1] : -1
 
-  return (
-    <div className="flex flex-col gap-2.5">
-      {streaming ? (
-        // Mid-generation: the step count isn't known yet, so show "Thinking…".
-        // The Genie spinner marks the broad thinking step (tools use the plain ring).
-        <div className="flex w-fit items-center gap-1.5 px-1 py-0.5 text-sm text-muted-foreground">
-          <GenieSpinner size={16} />
-          Thinking …
-        </div>
-      ) : (
-        // Settled: collapses to the final "N steps" count.
+  // Auto-open while streaming (full only); focus keeps completed steps hidden
+  // unless the user expands the header. Settled honors the user's toggle.
+  const bodyOpen = streaming ? (focus ? userOpen : true) : userOpen
+
+  // Render a set of child indices as an indented step list (plain helper, not a
+  // component — avoids remounting the children and resetting their local state).
+  const stepList = (indices: number[]) => (
+    <div className="ml-2 flex flex-col gap-2.5 border-l border-border pl-3">
+      {indices.map((c) => (
+        <ThreadItemView key={c} item={steps[c]} revealKey={childKey(parent, c)} props={props} focus={focus} />
+      ))}
+    </div>
+  )
+
+  // ── Streaming ──────────────────────────────────────────────────────────────
+  if (streaming) {
+    // Focus: only the newest revealed child is the "live" step; the rest are
+    // completed and hidden behind the header. Full: everything revealed shows.
+    const completedIndices = focus ? revealed.filter((c) => c !== liveIdx) : revealed
+    return (
+      <div className="flex flex-col gap-2.5">
         <Button
           variant="ghost"
           onClick={() => setUserOpen((o) => !o)}
-          className="-ml-[3px] h-auto w-fit justify-start gap-1.5 px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
+          className="-ml-[3px] h-auto w-fit justify-start gap-1.5 px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
         >
-          <GenieMark size={16} />
-          Thought process ({steps.length} steps)
-          <ChevronRightIcon size={14} className={cn("transition-transform", open && "rotate-90")} />
+          <GenieSpinner size={16} />
+          {/* Running count only in focus (B), gated by the global toggle, and only
+              once ≥1 step has settled; plain "Thinking…" otherwise. */}
+          {focus && props.showCompletedCount && completedCount > 0
+            ? `Thinking… (${completedCount} completed)`
+            : "Thinking…"}
+          <ChevronRightIcon size={14} className={cn("transition-transform", userOpen && "rotate-90")} />
         </Button>
-      )}
-      {open && (
-        <div className="ml-2 flex flex-col gap-2.5 border-l border-border pl-3">
-          {steps.map((child, c) =>
-            isVisible(reveal, childKey(parent, c)) ? (
-              <ThreadItemView key={c} item={child} revealKey={childKey(parent, c)} props={props} />
-            ) : null
-          )}
-        </div>
-      )}
+        {/* Completed steps: always shown in full mode; only when expanded in focus */}
+        {bodyOpen && completedIndices.length > 0 && stepList(completedIndices)}
+        {/* The single live step (focus only — full already rendered it above) */}
+        {focus && liveIdx >= 0 && stepList([liveIdx])}
+      </div>
+    )
+  }
+
+  // ── Settled / idle ───────────────────────────────────────────────────────────
+  const settledVisible = steps.map((_, c) => c).filter((c) => isVisible(reveal, childKey(parent, c)))
+  return (
+    <div className="flex flex-col gap-2.5">
+      <Button
+        variant="ghost"
+        onClick={() => setUserOpen((o) => !o)}
+        className="-ml-[3px] h-auto w-fit justify-start gap-1.5 px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
+      >
+        <GenieMark size={16} />
+        Thought process ({steps.length} steps)
+        <ChevronRightIcon size={14} className={cn("transition-transform", userOpen && "rotate-90")} />
+      </Button>
+      {userOpen && stepList(settledVisible)}
     </div>
   )
 }
@@ -583,10 +615,12 @@ function ThreadItemView({
   item,
   revealKey,
   props,
+  focus = false,
 }: {
   item: ThreadItem
   revealKey: string
   props: PlaygroundProps
+  focus?: boolean
 }) {
   const reveal = useReveal()
   switch (item.kind) {
@@ -625,7 +659,7 @@ function ThreadItemView({
       )
     }
     case "stepGroup":
-      return <StepGroup parent={Number(revealKey)} steps={item.children} props={props} />
+      return <StepGroup parent={Number(revealKey)} steps={item.children} props={props} focus={focus} />
     case "prose":
       return <p className="text-sm leading-5 text-foreground">{item.text}</p>
     case "thinking":
@@ -639,14 +673,17 @@ function ThreadItemView({
 }
 
 // Render a contiguous slice of THREAD items, gating each on the reveal timeline.
+// `focus` = Option B: streaming step-groups show only the single live step.
 function ThreadItems({
   from,
   to,
   props,
+  focus = false,
 }: {
   from: number
   to: number
   props: PlaygroundProps
+  focus?: boolean
 }) {
   const reveal = useReveal()
   return (
@@ -654,114 +691,32 @@ function ThreadItems({
       {THREAD.slice(from, to + 1).map((item, i) => {
         const idx = from + i
         if (!isVisible(reveal, topKey(idx))) return null
-        return <ThreadItemView key={idx} item={item} revealKey={topKey(idx)} props={props} />
-      })}
-    </div>
-  )
-}
-
-// ─── Density: Full (Option A) ─────────────────────────────────────────────────
-// Every step, flat. The unabridged transcript.
-
-function ThreadFull({ props }: { props: PlaygroundProps }) {
-  return <ThreadItems from={0} to={THREAD.length - 1} props={props} />
-}
-
-// ─── Density: Phased (Option B) ───────────────────────────────────────────────
-// runHeader + userPrompt render above; the rest collapses into 4 named phases,
-// each expandable in place. Each card owns its own open/closed state.
-
-function ThreadPhased({ props }: { props: PlaygroundProps }) {
-  const reveal = useReveal()
-  const [userOpen, setUserOpen] = useState<Record<number, boolean>>({})
-  return (
-    <div className="flex flex-col gap-2.5">
-      <ThreadItems from={0} to={PHASE_INTRO_COUNT - 1} props={props} />
-      {PHASES.map((phase, i) => {
-        // A phase appears once its first item is revealed; it streams until its
-        // last item settles, and auto-expands while streaming.
-        const started = isVisible(reveal, topKey(phase.start))
-        if (!started) return null
-        const done = isSettled(reveal, topKey(phase.end))
-        const streaming = reveal.active && !done
-        const isOpen = streaming || (userOpen[i] ?? false)
         return (
-          <div key={phase.label} className="flex flex-col gap-2.5">
-            <Button
-              variant="ghost"
-              onClick={() => setUserOpen((o) => ({ ...o, [i]: !o[i] }))}
-              className="h-auto w-full justify-start gap-2 px-1 py-1 text-sm font-normal text-foreground"
-            >
-              <ChevronRightIcon
-                size={14}
-                className={cn("shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")}
-              />
-              <span className="min-w-0 truncate">{phase.label}</span>
-              {streaming && <StatusGlyph status="running" size={14} />}
-              <span className="ml-auto shrink-0 text-hint text-muted-foreground">{phase.steps} steps</span>
-            </Button>
-            {isOpen && (
-              <div className="ml-2 border-l border-border pl-3">
-                <ThreadItems from={phase.start} to={phase.end} props={props} />
-              </div>
-            )}
-          </div>
+          <ThreadItemView key={idx} item={item} revealKey={topKey(idx)} props={props} focus={focus} />
         )
       })}
     </div>
   )
 }
 
-// ─── Density: Summary (Option C) ──────────────────────────────────────────────
-// One live line + "show steps" disclosure. Expanded → the full transcript.
+// ─── Density: Full (Option A) ─────────────────────────────────────────────────
+// Every step, flat. The unabridged transcript — streaming groups show all steps.
 
-function ThreadSummary({ props }: { props: PlaygroundProps }) {
-  const reveal = useReveal()
-  const [expanded, setExpanded] = useState(false)
+function ThreadFull({ props }: { props: PlaygroundProps }) {
+  return <ThreadItems from={0} to={THREAD.length - 1} props={props} />
+}
 
-  // "Complete" once the last thread item has settled. During a replay the line
-  // reads as live and working; when idle/settled it reads as the finished run.
-  const lastKey = topKey(THREAD.length - 1)
-  const complete = isSettled(reveal, lastKey)
-  // Auto-expand the transcript while streaming so you watch it fill in.
-  const showTranscript = (reveal.active && !complete) || expanded
+// ─── Density: Focus (Option B) ────────────────────────────────────────────────
+// Same flat structure as A, but a streaming group shows only the single live
+// step (see StepGroup's focus mode). Finished steps roll up behind the
+// expandable "Thinking… (N)" header; completed run collapses like A.
 
-  return (
-    <div className="flex flex-col gap-2.5">
-      <ThreadItems from={0} to={PHASE_INTRO_COUNT - 1} props={props} />
-      <div className="flex items-center gap-2 text-sm text-foreground">
-        {complete ? (
-          <StatusGlyph status="success" size={16} />
-        ) : (
-          <StatusGlyph status="running" size={16} />
-        )}
-        <span className="min-w-0 truncate">
-          {complete ? "NYC Taxi Trips EDA — complete" : "Analyzing trips — building the EDA notebook…"}
-        </span>
-      </div>
-      <Button
-        variant="ghost"
-        onClick={() => setExpanded((e) => !e)}
-        className="h-auto w-fit justify-start gap-1 px-1 py-0.5 text-sm font-normal text-muted-foreground hover:text-foreground"
-      >
-        {showTranscript ? "Hide steps" : "Show steps"}
-        <ChevronRightIcon
-          size={14}
-          className={cn("transition-transform", showTranscript && "rotate-90")}
-        />
-      </Button>
-      {showTranscript && (
-        <div className="border-t border-border pt-2.5">
-          <ThreadItems from={PHASE_INTRO_COUNT} to={THREAD.length - 1} props={props} />
-        </div>
-      )}
-    </div>
-  )
+function ThreadFocus({ props }: { props: PlaygroundProps }) {
+  return <ThreadItems from={0} to={THREAD.length - 1} props={props} focus />
 }
 
 function Thread({ density, props }: { density: Density; props: PlaygroundProps }) {
-  if (density === "phased") return <ThreadPhased props={props} />
-  if (density === "summary") return <ThreadSummary props={props} />
+  if (density === "focus") return <ThreadFocus props={props} />
   return <ThreadFull props={props} />
 }
 
@@ -957,6 +912,12 @@ function PlaygroundRail({
             disabled={!props.showStatus}
           />
         </div>
+        <ToggleRow
+          id="show-completed-count"
+          label="# of completed steps"
+          checked={props.showCompletedCount}
+          onChange={(v) => setProps({ ...props, showCompletedCount: v })}
+        />
       </div>
     </aside>
   )
@@ -971,16 +932,14 @@ export default function GenieThreadVariants() {
   // Which options are visible. Hidden ones collapse out; visible ones widen.
   const [hidden, setHidden] = useState<Record<Density, boolean>>({
     full: false,
-    phased: false,
-    summary: false,
+    focus: false,
   })
   const visible = OPTIONS.filter((o) => !hidden[o.density])
   const hiddenOptions = OPTIONS.filter((o) => hidden[o.density])
   const show = (d: Density) => setHidden((h) => ({ ...h, [d]: false }))
   const hide = (d: Density) => setHidden((h) => ({ ...h, [d]: true }))
   // Grid columns follow the visible count so cards fill the width.
-  const gridCols =
-    visible.length === 1 ? "lg:grid-cols-1" : visible.length === 2 ? "lg:grid-cols-2" : "lg:grid-cols-3"
+  const gridCols = visible.length === 1 ? "lg:grid-cols-1" : "lg:grid-cols-2"
 
   return (
     <RevealContext.Provider value={reveal}>
@@ -1011,7 +970,7 @@ export default function GenieThreadVariants() {
             <div className="flex shrink-0 items-start justify-between gap-4">
               <p className="text-sm text-muted-foreground">
                 Each card renders the same EDA thread at a different progress density. The Playground
-                on the left styles the tool &amp; step items across all three.
+                on the left styles the tool &amp; step items across both.
               </p>
               <div className="flex shrink-0 items-center gap-2">
                 {/* Restore chips for any hidden options */}
