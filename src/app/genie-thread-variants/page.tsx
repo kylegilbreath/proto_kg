@@ -220,7 +220,7 @@ const REVEAL_INDEX: Record<string, number> = (() => {
 
 // Total beats = every atom + a trailing settle beat so the last tool flips.
 const TOTAL_BEATS = Object.keys(REVEAL_INDEX).length + 2
-const BEAT_MS = 1100
+const BEAT_MS = 2100
 
 type RevealState = {
   active: boolean // a replay is currently playing (or was just played)
