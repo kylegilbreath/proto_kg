@@ -21,15 +21,16 @@
 
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef, createContext, useContext } from "react"
 import Link from "next/link"
-import { ArrowLeft, ArrowRight, Plus } from "lucide-react"
+import { ArrowLeft, ArrowRight, Plus, RotateCw, Eye, EyeOff } from "lucide-react"
 import {
   CheckIcon,
   ChevronRightIcon,
   ChevronDownIcon,
   NotebookIcon,
   CatalogIcon,
+  DangerIcon,
   SparkleDoubleFillIcon,
 } from "@/components/icons"
 import { DbIcon } from "@/components/ui/db-icon"
@@ -69,6 +70,14 @@ const DEFAULT_PROPS: PlaygroundProps = {
 // Intrinsic to each option card. Never driven by the playground rail.
 
 type Density = "full" | "phased" | "summary"
+
+type OptionDef = { density: Density; label: string; caption: string }
+
+const OPTIONS: OptionDef[] = [
+  { density: "full", label: "Option A", caption: "Full — every step, flat" },
+  { density: "phased", label: "Option B", caption: "Phased — 4 collapsible phases" },
+  { density: "summary", label: "Option C", caption: "Summary — one line, expand for detail" },
+]
 
 // ─── Thread model ─────────────────────────────────────────────────────────────
 // A close replica of the NYC-taxi EDA thread in the screenshots: a run header,
@@ -178,9 +187,217 @@ const PHASES: Phase[] = [
   { label: "Finishing up", start: 10, end: 11, steps: 2 },
 ]
 
+// ─── Reveal timeline ──────────────────────────────────────────────────────────
+// Rerun replays the thread as a live stream. Every revealable atom gets a global
+// reveal index in playback order: each top-level THREAD item is an atom, and a
+// step-group's children are atoms right after the group header. A running tick
+// counter gates visibility (index < tick) and settle (index resolves at
+// index + 1, so tools show a spinner for one beat before flipping to final).
+
+// Stable key per atom: top-level items use their THREAD index as a string;
+// step-children use "parentIndex.childIndex".
+function topKey(i: number) {
+  return String(i)
+}
+function childKey(parent: number, child: number) {
+  return `${parent}.${child}`
+}
+
+// Build key → reveal index in playback order.
+const REVEAL_INDEX: Record<string, number> = (() => {
+  const map: Record<string, number> = {}
+  let n = 0
+  THREAD.forEach((item, i) => {
+    map[topKey(i)] = n++
+    if (item.kind === "stepGroup") {
+      item.children.forEach((_, c) => {
+        map[childKey(i, c)] = n++
+      })
+    }
+  })
+  return map
+})()
+
+// Total beats = every atom + a trailing settle beat so the last tool flips.
+const TOTAL_BEATS = Object.keys(REVEAL_INDEX).length + 2
+const BEAT_MS = 600
+
+type RevealState = {
+  active: boolean // a replay is currently playing (or was just played)
+  tick: number // how many beats have elapsed; Infinity when idle/settled
+}
+
+const RevealContext = createContext<RevealState>({ active: false, tick: Infinity })
+const useReveal = () => useContext(RevealContext)
+
+// True if the atom at `key` should be shown yet.
+function isVisible(reveal: RevealState, key: string): boolean {
+  if (!reveal.active) return true
+  const idx = REVEAL_INDEX[key]
+  return idx === undefined || idx < reveal.tick
+}
+
+// True once the timeline has passed the atom's resolve beat (reveal + 1), i.e.
+// a tool has finished running and can show its final status.
+function isSettled(reveal: RevealState, key: string): boolean {
+  if (!reveal.active) return true
+  const idx = REVEAL_INDEX[key]
+  return idx === undefined || idx + 1 < reveal.tick
+}
+
+// Drives the shared timeline for all cards. rerun() restarts from 0.
+function useReplay() {
+  const [state, setState] = useState<RevealState>({ active: false, tick: Infinity })
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stop = () => {
+    if (timer.current) {
+      clearInterval(timer.current)
+      timer.current = null
+    }
+  }
+
+  const rerun = () => {
+    stop()
+    setState({ active: true, tick: 0 })
+    timer.current = setInterval(() => {
+      setState((s) => {
+        const next = s.tick + 1
+        if (next >= TOTAL_BEATS) {
+          stop()
+          // Settle: keep active so nothing snaps, but reveal everything.
+          return { active: true, tick: Infinity }
+        }
+        return { active: true, tick: next }
+      })
+    }, BEAT_MS)
+  }
+
+  useEffect(() => stop, [])
+
+  return { state, rerun }
+}
+
+// ─── Genie mark ───────────────────────────────────────────────────────────────
+// Static Genie lamp mark (no animation) — used as a leading icon, e.g. before the
+// "Thought process" step-group label. Same geometry as GenieSpinner.
+
+function GenieMark({ size = 16, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="-2 3 52 52"
+      shapeRendering="geometricPrecision"
+      textRendering="geometricPrecision"
+      width={size}
+      height={size}
+      preserveAspectRatio="xMidYMid meet"
+      role="presentation"
+      aria-hidden="true"
+      className={cn("shrink-0", className)}
+    >
+      <g transform="matrix(-0.305 0 0 0.305 23.363465 45.382455)">
+        <path
+          d="M24.72,6.616c0-7.308-4.772-13.232-10.659-13.232c0,0-28.122,0-28.122,0-5.887,0-10.659,5.924-10.659,13.232c0,0,49.44,0,49.44,0Z"
+          fill="#FF5F46"
+          strokeWidth="0"
+        />
+      </g>
+      <g transform="matrix(0.305 0 0 0.305 24 27.5)">
+        <g transform="translate(0,14.701)">
+          <path
+            d="M35.6,14.696c7.051-5.966,22.84-29.216,33.357-46.111c0,0-8.325,0-8.325,0-3.708,0-7.023,1.967-9.357,4.849-4.51,5.569-13.344,13.295-29.459,13.295c0,0-11.027,0-11.027,0-2.304,0-4.506,1.017-5.891,2.858-2.231,2.965-3.991,5.722-5.316,8.005-1.256,2.164-5.058,2.144-6.327-.014-1.37-2.328-3.229-5.15-5.654-8.181-1.384-1.73-3.511-2.668-5.727-2.668c0,0-29.657,0-29.657,0s0,.003,0,.003-2.504,0-2.504,0c-10.311,0-18.67,8.359-18.67,18.67s8.359,18.671,18.67,18.671c0-10.965-3.97-11.115-5.462-14.63-.278-.657-.432-1.394-.432-2.199c0-3.43,2.781-6.212,6.212-6.212c2.611.001,4.844,1.612,5.762,3.895c0-.019,0-.037,0-.055c6.482,15.638,21.087,26.543,38.065,26.543c24.236,0,34.692-10.754,41.742-16.719Z"
+            fill="#fabfba"
+            strokeWidth="0"
+          />
+        </g>
+      </g>
+      <g transform="matrix(0.305 0 0 0.305 24 27.5)">
+        <g transform="translate(-3.306,-27.505)">
+          <g transform="rotate(-90)">
+            <g transform="scale(-1,1) translate(0,0)">
+              <path d="M0,37.217c0-.047,0-.094,0-.142" fill="#FF5F46" strokeWidth="0" />
+              <path
+                d="M0,-37.217c.078,20.489,16.946,37.074,37.743,37.074C16.898,-0.142,0,16.521,0,37.075c0-20.554-16.898-37.217-37.742-37.217c20.796,0,37.665-16.586,37.742-37.075Z"
+                fill="#FF5F46"
+                strokeWidth="0"
+              />
+            </g>
+          </g>
+        </g>
+      </g>
+    </svg>
+  )
+}
+
+// ─── Genie spinner ────────────────────────────────────────────────────────────
+// The Genie lamp mark used as the "working" indicator (replaces the generic CSS
+// spinner). The sparkle rotates and the wisp pulses; keyframes are scoped to the
+// gs- class names so they don't collide with anything else on the page.
+
+function GenieSpinner({ size = 16 }: { size?: number }) {
+  return (
+    <span className="inline-flex shrink-0" style={{ width: size, height: size }} aria-label="Working">
+      <style>{`
+        @keyframes gs-spin { to { transform: rotate(360deg); } }
+        @keyframes gs-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+        .gs-sparkle { animation: gs-spin 1.6s linear infinite; transform-box: fill-box; transform-origin: center; }
+        .gs-wisp { animation: gs-pulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+        @media (prefers-reduced-motion: reduce) {
+          .gs-sparkle, .gs-wisp { animation: none; }
+        }
+      `}</style>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="-2 3 52 52"
+        shapeRendering="geometricPrecision"
+        textRendering="geometricPrecision"
+        width={size}
+        height={size}
+        preserveAspectRatio="xMidYMid meet"
+        role="presentation"
+        aria-hidden="true"
+      >
+        <g transform="matrix(-0.305 0 0 0.305 23.363465 45.382455)">
+          <path
+            d="M24.72,6.616c0-7.308-4.772-13.232-10.659-13.232c0,0-28.122,0-28.122,0-5.887,0-10.659,5.924-10.659,13.232c0,0,49.44,0,49.44,0Z"
+            fill="#FF5F46"
+            strokeWidth="0"
+          />
+        </g>
+        <g transform="matrix(0.305 0 0 0.305 24 27.5)">
+          <g transform="translate(0,14.701)" className="gs-wisp">
+            <g transform="translate(0,0)">
+              <path
+                d="M35.6,14.696c7.051-5.966,22.84-29.216,33.357-46.111c0,0-8.325,0-8.325,0-3.708,0-7.023,1.967-9.357,4.849-4.51,5.569-13.344,13.295-29.459,13.295c0,0-11.027,0-11.027,0-2.304,0-4.506,1.017-5.891,2.858-2.231,2.965-3.991,5.722-5.316,8.005-1.256,2.164-5.058,2.144-6.327-.014-1.37-2.328-3.229-5.15-5.654-8.181-1.384-1.73-3.511-2.668-5.727-2.668c0,0-29.657,0-29.657,0s0,.003,0,.003-2.504,0-2.504,0c-10.311,0-18.67,8.359-18.67,18.67s8.359,18.671,18.67,18.671c0-10.965-3.97-11.115-5.462-14.63-.278-.657-.432-1.394-.432-2.199c0-3.43,2.781-6.212,6.212-6.212c2.611.001,4.844,1.612,5.762,3.895c0-.019,0-.037,0-.055c6.482,15.638,21.087,26.543,38.065,26.543c24.236,0,34.692-10.754,41.742-16.719Z"
+                fill="#fabfba"
+                strokeWidth="0"
+              />
+            </g>
+          </g>
+        </g>
+        <g transform="matrix(0.305 0 0 0.305 24 27.5)">
+          <g transform="translate(-3.306,-27.505)" className="gs-sparkle">
+            <g transform="rotate(-90)">
+              <g transform="scale(-1,1) translate(0,0)">
+                <path d="M0,37.217c0-.047,0-.094,0-.142" fill="#FF5F46" strokeWidth="0" />
+                <path
+                  d="M0,-37.217c.078,20.489,16.946,37.074,37.743,37.074C16.898,-0.142,0,16.521,0,37.075c0-20.554-16.898-37.217-37.742-37.217c20.796,0,37.665-16.586,37.742-37.075Z"
+                  fill="#FF5F46"
+                  strokeWidth="0"
+                />
+              </g>
+            </g>
+          </g>
+        </g>
+      </svg>
+    </span>
+  )
+}
+
 // ─── Status glyph ─────────────────────────────────────────────────────────────
-// Mirrors the real Tool action states: success ✓, running/pendingOutput spinner,
-// failure ⚠, skipped redo. Colors use DuBois tokens.
+// Mirrors the real Tool action states: success ✓, running/pendingOutput = Genie
+// spinner, failure = DuBois DangerIcon in secondary color (quiet), skipped redo.
 
 function StatusGlyph({ status, size = 16 }: { status: ToolStatus; size?: number }) {
   if (status === "success") return <CheckIcon size={size} className="text-[var(--success)]" />
@@ -194,13 +411,7 @@ function StatusGlyph({ status, size = 16 }: { status: ToolStatus; size?: number 
     )
   if (status === "failure")
     return (
-      <span
-        className="inline-flex shrink-0 items-center justify-center rounded-full border border-[var(--warning)] text-[var(--warning)]"
-        style={{ width: size, height: size, fontSize: size * 0.72 }}
-        aria-label="Warning"
-      >
-        !
-      </span>
+      <DbIcon icon={DangerIcon} size={size} className="shrink-0 text-muted-foreground" ariaLabel="Failed" />
     )
   // skipped
   return (
@@ -216,9 +427,9 @@ function StatusGlyph({ status, size = 16 }: { status: ToolStatus; size?: number 
 
 function AssetChip({ asset }: { asset: AssetRef }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-xs text-foreground align-middle">
-      <DbIcon icon={asset.icon} size={12} className="text-muted-foreground" />
-      {asset.label}
+    <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 align-middle text-xs text-foreground">
+      <DbIcon icon={asset.icon} size={12} className="shrink-0 text-muted-foreground" />
+      <span className="min-w-0 truncate">{asset.label}</span>
     </span>
   )
 }
@@ -264,7 +475,7 @@ function ToolAction({
 
   // Contained: bordered "Tool action" card — leading chevron, title, trailing status
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2.5 text-sm">
+    <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm">
       <ChevronRightIcon size={14} className="shrink-0 text-muted-foreground" />
       <span className="min-w-0 truncate text-foreground">{title}</span>
       {asset && <AssetChip asset={asset} />}
@@ -273,33 +484,91 @@ function ToolAction({
   )
 }
 
+// ─── Thoughts block ───────────────────────────────────────────────────────────
+// A collapsible thought. Collapsed shows the first line of the actual thought
+// text (truncated to one line with a trailing chevron); expanded shows the full
+// text, wrapping. Default collapsed.
+
+function ThoughtsBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Button
+      variant="ghost"
+      onClick={() => setOpen((o) => !o)}
+      className="h-auto w-full items-start justify-start gap-1 whitespace-normal px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
+    >
+      <span
+        className={cn(
+          "min-w-0 flex-1 text-left",
+          open ? "whitespace-normal break-words" : "truncate"
+        )}
+      >
+        {text}
+      </span>
+      <ChevronRightIcon
+        size={14}
+        className={cn("mt-0.5 shrink-0 transition-transform", open && "rotate-90")}
+      />
+    </Button>
+  )
+}
+
 // ─── Step group ───────────────────────────────────────────────────────────────
 // Owns the thoughts/tools it hides. Collapsed → "N steps ▸". Expanded → "N steps
 // ▾" + children rendered inline, indented under a hairline. Default collapsed.
+// During a replay it auto-expands while its children stream, then collapses once
+// the last child settles (user can still re-expand). `parent` is the group's
+// THREAD index, used to derive each child's reveal key.
 
 function StepGroup({
+  parent,
   steps,
   props,
 }: {
+  parent: number
   steps: StepChild[]
   props: PlaygroundProps
 }) {
-  const [open, setOpen] = useState(false)
+  const reveal = useReveal()
+  const [userOpen, setUserOpen] = useState(false)
+
+  // "Thinking…" from the moment the group appears until its last child settles —
+  // never show the "N steps" count while still generating (would flash the count
+  // for the beat between the header revealing and the first child).
+  const lastChildKey = childKey(parent, steps.length - 1)
+  const streaming = reveal.active && !isSettled(reveal, lastChildKey)
+
+  // Auto-open while streaming; otherwise honor the user's toggle.
+  const open = streaming || userOpen
+
   return (
     <div className="flex flex-col gap-2.5">
-      <Button
-        variant="ghost"
-        onClick={() => setOpen((o) => !o)}
-        className="h-auto w-fit justify-start gap-1 px-1 py-0.5 text-sm font-normal text-muted-foreground hover:text-foreground"
-      >
-        {steps.length} steps
-        <ChevronRightIcon size={14} className={cn("transition-transform", open && "rotate-90")} />
-      </Button>
+      {streaming ? (
+        // Mid-generation: the step count isn't known yet, so show "Thinking…".
+        // The Genie spinner marks the broad thinking step (tools use the plain ring).
+        <div className="flex w-fit items-center gap-1.5 px-1 py-0.5 text-sm text-muted-foreground">
+          <GenieSpinner size={16} />
+          Thinking …
+        </div>
+      ) : (
+        // Settled: collapses to the final "N steps" count.
+        <Button
+          variant="ghost"
+          onClick={() => setUserOpen((o) => !o)}
+          className="-ml-[3px] h-auto w-fit justify-start gap-1.5 px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
+        >
+          <GenieMark size={16} />
+          Thought process ({steps.length} steps)
+          <ChevronRightIcon size={14} className={cn("transition-transform", open && "rotate-90")} />
+        </Button>
+      )}
       {open && (
         <div className="ml-2 flex flex-col gap-2.5 border-l border-border pl-3">
-          {steps.map((child, i) => (
-            <ThreadItemView key={i} item={child} props={props} />
-          ))}
+          {steps.map((child, c) =>
+            isVisible(reveal, childKey(parent, c)) ? (
+              <ThreadItemView key={c} item={child} revealKey={childKey(parent, c)} props={props} />
+            ) : null
+          )}
         </div>
       )}
     </div>
@@ -307,8 +576,19 @@ function StepGroup({
 }
 
 // ─── Thread renderer ──────────────────────────────────────────────────────────
+// `revealKey` gates a tool's running→final status during replay. Visibility of
+// the item itself is decided by the parent (ThreadItems / StepGroup).
 
-function ThreadItemView({ item, props }: { item: ThreadItem; props: PlaygroundProps }) {
+function ThreadItemView({
+  item,
+  revealKey,
+  props,
+}: {
+  item: ThreadItem
+  revealKey: string
+  props: PlaygroundProps
+}) {
+  const reveal = useReveal()
   switch (item.kind) {
     case "runHeader":
       return (
@@ -331,25 +611,21 @@ function ThreadItemView({ item, props }: { item: ThreadItem; props: PlaygroundPr
       )
     case "thoughts":
       if (!props.showThoughts) return null
-      return (
-        <div className="flex items-start gap-1 text-sm text-muted-foreground">
-          <span className="min-w-0 truncate">
-            <span className="font-semibold">Thoughts:</span> {item.text}
-          </span>
-          <ChevronRightIcon size={14} className="mt-0.5 shrink-0" />
-        </div>
-      )
-    case "tool":
+      return <ThoughtsBlock text={item.text} />
+    case "tool": {
+      // Show a spinner until the timeline passes this tool's resolve beat.
+      const effectiveStatus: ToolStatus = isSettled(reveal, revealKey) ? item.status : "running"
       return (
         <ToolAction
           title={item.title}
           asset={item.asset}
-          status={item.status}
+          status={effectiveStatus}
           props={props}
         />
       )
+    }
     case "stepGroup":
-      return <StepGroup steps={item.children} props={props} />
+      return <StepGroup parent={Number(revealKey)} steps={item.children} props={props} />
     case "prose":
       return <p className="text-sm leading-5 text-foreground">{item.text}</p>
     case "thinking":
@@ -362,7 +638,7 @@ function ThreadItemView({ item, props }: { item: ThreadItem; props: PlaygroundPr
   }
 }
 
-// Render a contiguous slice of THREAD items.
+// Render a contiguous slice of THREAD items, gating each on the reveal timeline.
 function ThreadItems({
   from,
   to,
@@ -372,11 +648,14 @@ function ThreadItems({
   to: number
   props: PlaygroundProps
 }) {
+  const reveal = useReveal()
   return (
     <div className="flex flex-col gap-2.5">
-      {THREAD.slice(from, to + 1).map((item, i) => (
-        <ThreadItemView key={from + i} item={item} props={props} />
-      ))}
+      {THREAD.slice(from, to + 1).map((item, i) => {
+        const idx = from + i
+        if (!isVisible(reveal, topKey(idx))) return null
+        return <ThreadItemView key={idx} item={item} revealKey={topKey(idx)} props={props} />
+      })}
     </div>
   )
 }
@@ -393,17 +672,24 @@ function ThreadFull({ props }: { props: PlaygroundProps }) {
 // each expandable in place. Each card owns its own open/closed state.
 
 function ThreadPhased({ props }: { props: PlaygroundProps }) {
-  const [open, setOpen] = useState<Record<number, boolean>>({})
+  const reveal = useReveal()
+  const [userOpen, setUserOpen] = useState<Record<number, boolean>>({})
   return (
     <div className="flex flex-col gap-2.5">
       <ThreadItems from={0} to={PHASE_INTRO_COUNT - 1} props={props} />
       {PHASES.map((phase, i) => {
-        const isOpen = open[i] ?? false
+        // A phase appears once its first item is revealed; it streams until its
+        // last item settles, and auto-expands while streaming.
+        const started = isVisible(reveal, topKey(phase.start))
+        if (!started) return null
+        const done = isSettled(reveal, topKey(phase.end))
+        const streaming = reveal.active && !done
+        const isOpen = streaming || (userOpen[i] ?? false)
         return (
           <div key={phase.label} className="flex flex-col gap-2.5">
             <Button
               variant="ghost"
-              onClick={() => setOpen((o) => ({ ...o, [i]: !o[i] }))}
+              onClick={() => setUserOpen((o) => ({ ...o, [i]: !o[i] }))}
               className="h-auto w-full justify-start gap-2 px-1 py-1 text-sm font-normal text-foreground"
             >
               <ChevronRightIcon
@@ -411,6 +697,7 @@ function ThreadPhased({ props }: { props: PlaygroundProps }) {
                 className={cn("shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")}
               />
               <span className="min-w-0 truncate">{phase.label}</span>
+              {streaming && <StatusGlyph status="running" size={14} />}
               <span className="ml-auto shrink-0 text-hint text-muted-foreground">{phase.steps} steps</span>
             </Button>
             {isOpen && (
@@ -429,26 +716,41 @@ function ThreadPhased({ props }: { props: PlaygroundProps }) {
 // One live line + "show steps" disclosure. Expanded → the full transcript.
 
 function ThreadSummary({ props }: { props: PlaygroundProps }) {
+  const reveal = useReveal()
   const [expanded, setExpanded] = useState(false)
+
+  // "Complete" once the last thread item has settled. During a replay the line
+  // reads as live and working; when idle/settled it reads as the finished run.
+  const lastKey = topKey(THREAD.length - 1)
+  const complete = isSettled(reveal, lastKey)
+  // Auto-expand the transcript while streaming so you watch it fill in.
+  const showTranscript = (reveal.active && !complete) || expanded
+
   return (
     <div className="flex flex-col gap-2.5">
       <ThreadItems from={0} to={PHASE_INTRO_COUNT - 1} props={props} />
       <div className="flex items-center gap-2 text-sm text-foreground">
-        <StatusGlyph status="running" size={16} />
-        <span className="min-w-0 truncate">Analyzing trips — building the EDA notebook…</span>
+        {complete ? (
+          <StatusGlyph status="success" size={16} />
+        ) : (
+          <StatusGlyph status="running" size={16} />
+        )}
+        <span className="min-w-0 truncate">
+          {complete ? "NYC Taxi Trips EDA — complete" : "Analyzing trips — building the EDA notebook…"}
+        </span>
       </div>
       <Button
         variant="ghost"
         onClick={() => setExpanded((e) => !e)}
         className="h-auto w-fit justify-start gap-1 px-1 py-0.5 text-sm font-normal text-muted-foreground hover:text-foreground"
       >
-        {expanded ? "Hide steps" : "Show steps"}
+        {showTranscript ? "Hide steps" : "Show steps"}
         <ChevronRightIcon
           size={14}
-          className={cn("transition-transform", expanded && "rotate-90")}
+          className={cn("transition-transform", showTranscript && "rotate-90")}
         />
       </Button>
-      {expanded && (
+      {showTranscript && (
         <div className="border-t border-border pt-2.5">
           <ThreadItems from={PHASE_INTRO_COUNT} to={THREAD.length - 1} props={props} />
         </div>
@@ -515,20 +817,47 @@ function OptionCard({
   caption,
   density,
   props,
+  onHide,
+  canHide,
 }: {
   label: string
   caption: string
   density: Density
   props: PlaygroundProps
+  onHide: () => void
+  canHide: boolean
 }) {
+  const reveal = useReveal()
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Follow the newest revealed item during a replay.
+  useEffect(() => {
+    if (reveal.active && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [reveal.active, reveal.tick])
+
   return (
     <div className="flex min-h-0 min-w-0 flex-col gap-3">
-      <div className="flex shrink-0 flex-col gap-0.5">
-        <span className="text-sm font-semibold text-foreground">{label}</span>
-        <span className="text-hint text-muted-foreground">{caption}</span>
+      <div className="flex shrink-0 items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm font-semibold text-foreground">{label}</span>
+          <span className="text-hint text-muted-foreground">{caption}</span>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={onHide}
+          disabled={!canHide}
+          aria-label={`Hide ${label}`}
+          title={canHide ? `Hide ${label}` : "Keep at least one option visible"}
+          className="shrink-0 text-muted-foreground"
+        >
+          <EyeOff className="h-4 w-4" />
+        </Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col rounded-md border border-border bg-background p-4">
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
           <Thread density={density} props={props} />
         </div>
         <ThreadComposer />
@@ -637,8 +966,24 @@ function PlaygroundRail({
 
 export default function GenieThreadVariants() {
   const [props, setProps] = useState<PlaygroundProps>(DEFAULT_PROPS)
+  const { state: reveal, rerun } = useReplay()
+
+  // Which options are visible. Hidden ones collapse out; visible ones widen.
+  const [hidden, setHidden] = useState<Record<Density, boolean>>({
+    full: false,
+    phased: false,
+    summary: false,
+  })
+  const visible = OPTIONS.filter((o) => !hidden[o.density])
+  const hiddenOptions = OPTIONS.filter((o) => hidden[o.density])
+  const show = (d: Density) => setHidden((h) => ({ ...h, [d]: false }))
+  const hide = (d: Density) => setHidden((h) => ({ ...h, [d]: true }))
+  // Grid columns follow the visible count so cards fill the width.
+  const gridCols =
+    visible.length === 1 ? "lg:grid-cols-1" : visible.length === 2 ? "lg:grid-cols-2" : "lg:grid-cols-3"
 
   return (
+    <RevealContext.Provider value={reveal}>
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-6">
         <div className="flex items-center gap-2">
@@ -663,18 +1008,48 @@ export default function GenieThreadVariants() {
 
         <main className="flex-1 overflow-hidden px-8 py-8">
           <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6">
-            <p className="shrink-0 text-sm text-muted-foreground">
-              Each card renders the same EDA thread at a different progress density. The Playground
-              on the left styles the tool &amp; step items across all three.
-            </p>
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-8 lg:grid-cols-3">
-              <OptionCard label="Option A" caption="Full — every step, flat" density="full" props={props} />
-              <OptionCard label="Option B" caption="Phased — 4 collapsible phases" density="phased" props={props} />
-              <OptionCard label="Option C" caption="Summary — one line, expand for detail" density="summary" props={props} />
+            <div className="flex shrink-0 items-start justify-between gap-4">
+              <p className="text-sm text-muted-foreground">
+                Each card renders the same EDA thread at a different progress density. The Playground
+                on the left styles the tool &amp; step items across all three.
+              </p>
+              <div className="flex shrink-0 items-center gap-2">
+                {/* Restore chips for any hidden options */}
+                {hiddenOptions.map((o) => (
+                  <Button
+                    key={o.density}
+                    variant="default"
+                    size="sm"
+                    onClick={() => show(o.density)}
+                    className="gap-1.5 text-muted-foreground"
+                  >
+                    <Eye className="h-4 w-4" />
+                    Show {o.label.replace("Option ", "")}
+                  </Button>
+                ))}
+                <Button size="sm" onClick={rerun} className="gap-1.5">
+                  <RotateCw className="h-4 w-4" />
+                  Rerun
+                </Button>
+              </div>
+            </div>
+            <div className={cn("grid min-h-0 flex-1 grid-cols-1 gap-8", gridCols)}>
+              {visible.map((o) => (
+                <OptionCard
+                  key={o.density}
+                  label={o.label}
+                  caption={o.caption}
+                  density={o.density}
+                  props={props}
+                  onHide={() => hide(o.density)}
+                  canHide={visible.length > 1}
+                />
+              ))}
             </div>
           </div>
         </main>
       </div>
     </div>
+    </RevealContext.Provider>
   )
 }
