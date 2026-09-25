@@ -1361,12 +1361,21 @@ function StepGroup({
   // Plain helper, not a component — avoids remounting children and resetting
   // their local state. `nested` = inside an expanded fold.
   const stepList = (indices: number[], nested: boolean) => {
-    const segments = props.groupRepeatedTools
-      ? segmentSteps(indices, steps)
-      : indices.map((c) => [c])
-    // Combined: the whole list is one card, one row per step.
+    // Combined: the whole list is one card, one row per step — except a thought
+    // that is still thinking, which is never contained: it renders inline below
+    // the card and joins it as a row once it finishes.
     const combined = props.toolMode === "combined"
-    const list = (
+    const lastIdx = indices[indices.length - 1]
+    const liveThought =
+      combined &&
+      lastIdx !== undefined &&
+      steps[lastIdx].kind === "thoughts" &&
+      isActive(tl, childKey(parent, lastIdx))
+    const cardIndices = liveThought ? indices.slice(0, -1) : indices
+    const segments = props.groupRepeatedTools
+      ? segmentSteps(cardIndices, steps)
+      : cardIndices.map((c) => [c])
+    const card = (
       <div className={combined ? STACK_CARD : "flex flex-col gap-2.5"}>
         {segments.map((seg) =>
           seg.length > 1 ? (
@@ -1390,6 +1399,19 @@ function StepGroup({
           )
         )}
       </div>
+    )
+    const list = liveThought ? (
+      <div className="flex flex-col gap-2.5">
+        {cardIndices.length > 0 && card}
+        <ThreadItemView
+          item={steps[lastIdx]}
+          revealKey={childKey(parent, lastIdx)}
+          props={props}
+          variant={variant}
+        />
+      </div>
+    ) : (
+      card
     )
     return nested ? <div className={nestedStepsClass(props, variant)}>{list}</div> : list
   }
