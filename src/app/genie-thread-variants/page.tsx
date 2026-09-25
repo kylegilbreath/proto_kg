@@ -1,29 +1,44 @@
 // ─── Genie thread variants ──────────────────────────────────────────────────
 // Standalone comparison page (no AppShell chrome, full-bleed) for exploring how
-// a Genie CODE THREAD renders its steps.
+// a Genie CODE THREAD renders its reasoning and steps while it streams.
 //
-// Two independent axes:
-//   • Left rail = Playground — global props that style the TOOL/STEP ITEMS inside
-//     every thread. They do NOT touch density or collapse. Props:
-//       - Tool UI mode: Minimal (flat inline line) · Contained (bordered card) ·
-//         Mix (prose/thoughts inline, tools contained)
-//       - Show Thoughts        — whether Thoughts lines appear
-//       - Show status glyphs   — whether the trailing ✓/⚠/spinner shows
-//   • Right = Option cards, differing by PROGRESS DENSITY (intrinsic per option,
-//     never driven by the rail; each owns its own local expand/collapse state):
-//       - A Full   every step streams visibly, flat transcript
-//       - B Focus  same structure, but a streaming group shows only the single
-//                  live step; finished steps roll up behind "Thinking… (N)"
-//     Both render the same faithful EDA thread so the tool styling reads
-//     comparably across densities.
+//   • Transport = Restart · Play/Pause · speed · scrubber. The thread replays on
+//     a real clock: every thought / tool / prose line has a duration (ms), text
+//     streams in character by character, and tools spin until they resolve.
+//   • Left rail = Proposal Playground — props that apply to EVERY card: tool UI mode,
+//     step density (flat vs one at a time; Proposed only, Today is always flat),
+//     thoughts / status visibility,
+//     repeated-tool grouping, and the Proposed loader's escalation thresholds.
+//     Rail state is mirrored into URL params so a setup can be shared as a link;
+//     the Summary block at the top of the rail describes it in words.
+//   • Right = Option cards, differing only in how REASONING renders:
+//       - Today       faithful to universe NativeThinking: the active thought
+//                     streams inline under "Thinking…", then auto-collapses to
+//                     "Thoughts: <first line>".
+//       - Proposed    thoughts collapsed by default; while thinking, a loader
+//                     whose label escalates (Thinking → Still thinking → Taking
+//                     longer) plus a live timer; "Thought" when done.
+//     Runs of steps fold into "N steps" once prose follows them (FoldedToolCalls).
 //
 // Linked from the Prototype Hub home page (PROTOTYPES array in src/app/page.tsx).
 
 "use client"
 
-import { useState, useEffect, useRef, createContext, useContext } from "react"
+import { Suspense, useState, useEffect, useRef, useId, useMemo, createContext, useContext } from "react"
 import Link from "next/link"
-import { ArrowLeft, ArrowRight, Plus, RotateCw, Eye, EyeOff } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import {
+  ArrowLeft,
+  ArrowRight,
+  Plus,
+  RotateCcw,
+  Play,
+  Pause,
+  Eye,
+  EyeOff,
+  Link2,
+  Check,
+} from "lucide-react"
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -31,7 +46,11 @@ import {
   NotebookIcon,
   CatalogIcon,
   DangerIcon,
-  SparkleDoubleFillIcon,
+  CalendarClockIcon,
+  DecimalIcon,
+  HashIcon,
+  CopyIcon,
+  DownloadIcon,
 } from "@/components/icons"
 import { DbIcon } from "@/components/ui/db-icon"
 import { Button } from "@/components/ui/button"
@@ -39,63 +58,200 @@ import { DatabricksLogo } from "@/components/shell/DatabricksLogo"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Slider } from "@/components/ui/slider"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { SegmentedControl, SegmentedItem } from "@/components/ui/segmented-control"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 
 // ─── Playground props ─────────────────────────────────────────────────────────
-// One state object styles the tool/step items in every card. These props DO NOT
-// affect density or collapse — that is intrinsic to each option (see Density).
+// One state object styles the steps in every card. Reasoning treatment is the
+// only thing intrinsic to each option (see Options).
 
-type ToolMode = "minimal" | "contained" | "mix"
+// combined = every run of steps (thoughts + tools) shares one card, one row per
+// step with dividers between; repeated tools expand in place as indented rows.
+type ToolMode = "minimal" | "contained" | "mix" | "combined"
+
+// flat  = every revealed step of a streaming run shows, as a flat list.
+// focus = only the live (newest) step shows; finished steps roll up behind an
+//         expandable "N steps" header above it.
+type Density = "flat" | "focus"
 
 type PlaygroundProps = {
   toolMode: ToolMode
+  density: Density
   showThoughts: boolean
   // Master status toggle + independent success / failure children. When
   // showStatus is off, neither glyph shows regardless of the child flags.
   showStatus: boolean
   showSuccess: boolean
   showFailure: boolean
-  // Show the running "(N completed)" count in the focus "Thinking…" header.
+  // Count finished steps in the focus roll-up header ("3 steps" vs "Previous steps").
   showCompletedCount: boolean
   // Collapse consecutive same-title tool calls into one "×N" expandable row.
   groupRepeatedTools: boolean
+  // Live elapsed-seconds readout left of a running tool's spinner.
+  showToolTimer: boolean
+  // Expanded step lists ("N steps", "×N") sit in an indented left-rule
+  // container. Proposed only; Today is always flush.
+  indentSteps: boolean
+  // Proposed loader escalation thresholds, in seconds of thinking.
+  stillThinkingAfter: number
+  takingLongerAfter: number
 }
 
 const DEFAULT_PROPS: PlaygroundProps = {
   toolMode: "minimal",
+  density: "flat",
   showThoughts: true,
   showStatus: true,
   showSuccess: true,
   showFailure: true,
   showCompletedCount: true,
   groupRepeatedTools: true,
+  showToolTimer: true,
+  indentSteps: true,
+  stillThinkingAfter: 5,
+  takingLongerAfter: 15,
 }
 
-// ─── Density ────────────────────────────────────────────────────────────────
-// Intrinsic to each option card. Never driven by the playground rail.
+const TOOL_MODE_LABEL: Record<ToolMode, string> = {
+  minimal: "Minimal",
+  contained: "Contained",
+  mix: "Mix",
+  combined: "Combined",
+}
 
-// full  = A: every step streams visibly, flat transcript.
-// focus = B: same flat structure, but a streaming group shows only the single
-//            live step; completed steps roll up behind an expandable "Thinking…"
-//            header with a running completed-count.
-type Density = "full" | "focus"
+// ─── Options ──────────────────────────────────────────────────────────────────
 
-type OptionDef = { density: Density; label: string; caption: string }
+type Variant = "today" | "proposed"
+
+type OptionDef = { variant: Variant; name: string; caption: string }
 
 const OPTIONS: OptionDef[] = [
-  { density: "full", label: "Option A", caption: "Full — every step streams, flat" },
   {
-    density: "focus",
-    label: "Option B",
-    caption: "One at a time — only the live step shows; finished steps roll up",
+    variant: "today",
+    name: "Today",
+    caption: "Current. The active thought streams inline, then collapses to a one-line preview.",
+  },
+  {
+    variant: "proposed",
+    name: "Proposed",
+    caption: "Thoughts collapsed by default. Escalating loader and live timer while thinking.",
   },
 ]
 
+// ─── URL state ────────────────────────────────────────────────────────────────
+// Rail props + hidden cards round-trip through short query params so a setup
+// can be shared as a link. Only values that differ from the defaults are written.
+
+const PARAM_KEYS: Record<keyof PlaygroundProps, string> = {
+  toolMode: "tool",
+  density: "density",
+  showThoughts: "thoughts",
+  showStatus: "status",
+  showSuccess: "success",
+  showFailure: "failure",
+  showCompletedCount: "count",
+  groupRepeatedTools: "group",
+  showToolTimer: "timer",
+  indentSteps: "indent",
+  stillThinkingAfter: "still",
+  takingLongerAfter: "longer",
+}
+
+const PROP_KEYS = Object.keys(PARAM_KEYS) as (keyof PlaygroundProps)[]
+
+function encodeState(props: PlaygroundProps, hidden: Variant[]): string {
+  const q = new URLSearchParams()
+  for (const key of PROP_KEYS) {
+    const v = props[key]
+    if (v === DEFAULT_PROPS[key]) continue
+    q.set(PARAM_KEYS[key], typeof v === "boolean" ? (v ? "1" : "0") : String(v))
+  }
+  if (hidden.length) q.set("hide", hidden.join(","))
+  return q.toString()
+}
+
+function decodeState(search: string): { props: PlaygroundProps; hidden: Variant[] } {
+  const q = new URLSearchParams(search)
+  const out: Record<string, unknown> = { ...DEFAULT_PROPS }
+  for (const key of PROP_KEYS) {
+    const raw = q.get(PARAM_KEYS[key])
+    if (raw === null) continue
+    const fallback = DEFAULT_PROPS[key]
+    if (typeof fallback === "boolean") out[key] = raw === "1"
+    else if (typeof fallback === "number") {
+      const n = Number(raw)
+      if (Number.isFinite(n) && n > 0) out[key] = n
+    } else out[key] = raw
+  }
+  const props = out as PlaygroundProps
+  if (!(props.toolMode in TOOL_MODE_LABEL)) props.toolMode = DEFAULT_PROPS.toolMode
+  if (props.density !== "flat" && props.density !== "focus") props.density = DEFAULT_PROPS.density
+  const hidden = (q.get("hide") ?? "")
+    .split(",")
+    .filter((v): v is Variant => OPTIONS.some((o) => o.variant === v))
+  return { props, hidden }
+}
+
+// ─── Setup summary ────────────────────────────────────────────────────────────
+// Plain-language readout of the combined rail state. Rows that differ from the
+// defaults are flagged so a shared link reads at a glance.
+
+function statusSummary(p: PlaygroundProps): string {
+  if (!p.showStatus) return "Hidden"
+  if (p.showSuccess && p.showFailure) return "Success + failure"
+  if (p.showSuccess) return "Success only"
+  if (p.showFailure) return "Failure only"
+  return "Running only"
+}
+
+type SummaryRow = { label: string; value: string; changed: boolean }
+
+function summarize(p: PlaygroundProps): SummaryRow[] {
+  const d = DEFAULT_PROPS
+  const rows: SummaryRow[] = [
+    { label: "Tool UI", value: TOOL_MODE_LABEL[p.toolMode], changed: p.toolMode !== d.toolMode },
+    {
+      label: "Density",
+      value: p.density === "flat" ? "Flat" : "One at a time",
+      changed: p.density !== d.density,
+    },
+  ]
+  if (p.density === "focus")
+    rows.push({
+      label: "Roll-up count",
+      value: p.showCompletedCount ? "On" : "Off",
+      changed: p.showCompletedCount !== d.showCompletedCount,
+    })
+  rows.push(
+    { label: "Thoughts", value: p.showThoughts ? "Shown" : "Hidden", changed: p.showThoughts !== d.showThoughts },
+    { label: "Status", value: statusSummary(p), changed: statusSummary(p) !== statusSummary(d) },
+    {
+      label: "Repeated tools",
+      value: p.groupRepeatedTools ? "Grouped" : "Separate",
+      changed: p.groupRepeatedTools !== d.groupRepeatedTools,
+    },
+    { label: "Tool timer", value: p.showToolTimer ? "On" : "Off", changed: p.showToolTimer !== d.showToolTimer },
+    { label: "Step indent", value: p.indentSteps ? "Indented" : "Flush", changed: p.indentSteps !== d.indentSteps },
+    {
+      label: "Proposed loader",
+      value: `${p.stillThinkingAfter}s / ${p.takingLongerAfter}s`,
+      changed:
+        p.stillThinkingAfter !== d.stillThinkingAfter || p.takingLongerAfter !== d.takingLongerAfter,
+    },
+  )
+  return rows
+}
+
 // ─── Thread model ─────────────────────────────────────────────────────────────
-// A close replica of the NYC-taxi EDA thread in the screenshots: a run header,
-// interleaved Thoughts lines, tool actions with real statuses, "N steps" group
-// collapsers, prose summaries, and an asset disclosure.
+// A close replica of the NYC-taxi EDA thread: a run header, interleaved Thoughts,
+// tool actions with real statuses, step runs, prose summaries, and asset chips.
+// `ms` is how long each atom takes on the replay clock (thoughts and prose
+// stream over it; tools spin for it). A few thoughts run past 15s on purpose so
+// the Proposed loader escalates all the way.
 
 type ToolStatus = "success" | "running" | "pendingOutput" | "failure" | "skipped"
 
@@ -106,24 +262,71 @@ type IconComponent = React.ComponentType<
 
 type AssetRef = { label: string; icon: IconComponent }
 
-// A step-group's hidden children are only thoughts and tools.
+// Expandable body of a query tool: the SQL it ran, plus its result on success
+// or an error line on failure. Tools without a detail have nothing to expand.
+type ColumnType = "timestamp" | "double" | "int"
+type QueryResult = { columns: { name: string; type: ColumnType }[]; rows: string[][] }
+type ToolDetail = { sql: string; result?: QueryResult; error?: string }
+
+// A step run's children are only thoughts and tools.
 type StepChild =
-  | { kind: "thoughts"; text: string }
-  | { kind: "tool"; title: string; asset?: AssetRef; status: ToolStatus }
+  | { kind: "thoughts"; text: string; ms: number }
+  | {
+      kind: "tool"
+      title: string
+      asset?: AssetRef
+      status: ToolStatus
+      ms: number
+      detail?: ToolDetail
+    }
 
 type ThreadItem =
   | { kind: "runHeader"; title: string; icon: IconComponent }
   | { kind: "userPrompt"; text: string; asset?: AssetRef }
-  | { kind: "thoughts"; text: string }
-  | { kind: "tool"; title: string; asset?: AssetRef; status: ToolStatus }
-  // A step-group OWNS the thoughts/tools it hides. Collapsed → "N steps ▸".
-  // Expanded → "N steps ▾" + children rendered inline. count === children.length.
+  | StepChild
+  // A run of steps between prose lines. Folds into "N steps" once prose follows.
   | { kind: "stepGroup"; children: StepChild[] }
-  | { kind: "prose"; text: string }
-  | { kind: "thinking" }
+  | { kind: "prose"; text: string; ms: number }
 
 const TRIPS: AssetRef = { label: "trips", icon: CatalogIcon }
 const NB: AssetRef = { label: "New Notebook 2026-08-27…", icon: NotebookIcon }
+
+const SAMPLE_SORTED_SQL = `SELECT
+  *
+FROM
+  samples.nyctaxi.trips
+ORDER BY
+  tpep_pickup_datetime DESC
+LIMIT 10`
+
+const SAMPLE_SQL = `SELECT
+  *
+FROM
+  samples.nyctaxi.trips
+LIMIT 10`
+
+const SAMPLE_RESULT: QueryResult = {
+  columns: [
+    { name: "tpep_pickup_datetime", type: "timestamp" },
+    { name: "tpep_dropoff_datetime", type: "timestamp" },
+    { name: "trip_distance", type: "double" },
+    { name: "fare_amount", type: "double" },
+    { name: "pickup_zip", type: "int" },
+    { name: "dropoff_zip", type: "int" },
+  ],
+  rows: [
+    ["2016-02-16T22:40:45.000+00:00", "2016-02-16T22:59:25.000+00:00", "5.35", "18.5", "10003", "11238"],
+    ["2016-02-05T16:06:44.000+00:00", "2016-02-05T16:26:03.000+00:00", "6.5", "21.5", "10282", "10001"],
+    ["2016-02-08T07:39:25.000+00:00", "2016-02-08T07:44:14.000+00:00", "0.9", "5.5", "10119", "10003"],
+    ["2016-02-29T22:25:33.000+00:00", "2016-02-29T22:38:09.000+00:00", "3.5", "13.5", "10001", "11222"],
+    ["2016-02-03T17:21:02.000+00:00", "2016-02-03T17:23:24.000+00:00", "0.3", "3.5", "10028", "10028"],
+    ["2016-02-19T12:48:30.000+00:00", "2016-02-19T13:04:41.000+00:00", "2.1", "11.0", "10016", "10022"],
+    ["2016-02-11T08:15:12.000+00:00", "2016-02-11T08:33:50.000+00:00", "4.2", "16.0", "10025", "10011"],
+    ["2016-02-24T19:02:57.000+00:00", "2016-02-24T19:09:36.000+00:00", "1.1", "6.5", "10014", "10012"],
+    ["2016-02-06T01:37:18.000+00:00", "2016-02-06T01:58:02.000+00:00", "8.7", "26.0", "10036", "11211"],
+    ["2016-02-13T14:22:40.000+00:00", "2016-02-13T14:31:15.000+00:00", "1.6", "8.0", "10065", "10021"],
+  ],
+}
 
 const THREAD: ThreadItem[] = [
   { kind: "runHeader", title: "NFL Combine Exploration", icon: NotebookIcon },
@@ -133,69 +336,111 @@ const THREAD: ThreadItem[] = [
     children: [
       {
         kind: "thoughts",
-        text: "The user wants to perform exploratory data analysis on the samples.nyctaxi.trips table. Before I touch the data I should check whether there's a relevant skill that governs how EDA on a trips table ought to be done — column conventions, date scoping, and any performance caveats for large Delta shares. Let me read the available skills first so I follow the established pattern rather than improvising queries that might time out or miss required temporal validation.",
+        ms: 18000,
+        text: "The user wants to perform exploratory data analysis on the samples.nyctaxi.trips table.\nBefore I touch the data I should check whether there's a relevant skill that governs how EDA on a trips table ought to be done — column conventions, date scoping, and any performance caveats for large Delta shares. Let me read the available skills first so I follow the established pattern rather than improvising queries that might time out or miss required temporal validation.",
       },
-      { kind: "tool", title: "Read skill", status: "success" },
-      { kind: "thoughts", text: "The skill says I need to load temporal-validation.md since EDA on a trips table needs date scoping." },
-      { kind: "tool", title: "Loaded skill details", status: "success" },
-      { kind: "thoughts", text: "Now let me get the table schema and a sample of the data simultaneously." },
-      { kind: "tool", title: "Read table structure", asset: TRIPS, status: "success" },
-      { kind: "tool", title: "Sample NYC taxi trips data", status: "failure" },
-      { kind: "thoughts", text: "The order by clause caused a timeout on a sample. I should try without sorting." },
-      { kind: "tool", title: "Sample NYC taxi trips without sort", status: "failure" },
-      { kind: "thoughts", text: "Interesting — even the simplest sample query is timing out. This might be a large Delta share." },
+      { kind: "tool", title: "Read skill", status: "success", ms: 3000 },
+      {
+        kind: "thoughts",
+        ms: 6000,
+        text: "The skill says I need to load temporal-validation.md since EDA on a trips table needs date scoping.\nWithout it I'd risk scanning the full history of the share on every query.",
+      },
+      { kind: "tool", title: "Loaded skill details", status: "success", ms: 2500 },
+      { kind: "thoughts", ms: 4000, text: "Now let me get the table schema and a sample of the data simultaneously." },
+      { kind: "tool", title: "Read table structure", asset: TRIPS, status: "success", ms: 3500 },
+      {
+        kind: "tool",
+        title: "Sample NYC taxi trips data",
+        status: "failure",
+        ms: 6000,
+        detail: { sql: SAMPLE_SORTED_SQL, error: "Query timed out. No rows returned." },
+      },
+      {
+        kind: "thoughts",
+        ms: 7000,
+        text: "The order by clause caused a timeout on a sample. I should try without sorting.\nSorting forces a full shuffle before any rows come back, which is expensive on a table this size.",
+      },
+      {
+        kind: "tool",
+        title: "Sample NYC taxi trips without sort",
+        status: "success",
+        ms: 17000,
+        detail: { sql: SAMPLE_SQL, result: SAMPLE_RESULT },
+      },
+      {
+        kind: "thoughts",
+        ms: 16000,
+        text: "The unsorted sample came back, so the ORDER BY was the problem. This looks like a large Delta share.\nIf the table is shared from another metastore, a sort forces a full scan over the wire with no local data skipping, while a plain LIMIT can stop early. I have the schema and real sample rows now, so I'll build date-scoped queries into the notebook so each cell only touches a narrow window.",
+      },
     ],
   },
   {
     kind: "prose",
+    ms: 4000,
     text: "The table is a large Delta Shared dataset. I have the schema — 6 columns: timestamps, trip distance, fare amount, and zip codes. I'll build the EDA notebook now with date-scoped queries for performance.",
   },
   {
     kind: "stepGroup",
     children: [
-      { kind: "tool", title: "Created New Notebook 2026-08-27", asset: NB, status: "success" },
-      { kind: "thoughts", text: "I'll add cells for schema, volume, temporal coverage, fare/distance distributions, and top routes." },
-      { kind: "tool", title: "Edited", asset: NB, status: "failure" },
-      { kind: "tool", title: "Edited", asset: NB, status: "success" },
-      { kind: "tool", title: "Edited", asset: NB, status: "success" },
-    ],
-  },
-  { kind: "prose", text: "Now I'll run all code cells. I'll run the first few cells concurrently to warm up compute:" },
-  {
-    kind: "stepGroup",
-    children: [
-      { kind: "tool", title: "Edited", asset: NB, status: "success" },
-      { kind: "tool", title: "Edited", asset: NB, status: "success" },
+      { kind: "tool", title: "Created New Notebook 2026-08-27", asset: NB, status: "success", ms: 3000 },
+      {
+        kind: "thoughts",
+        ms: 8000,
+        text: "I'll add cells for schema, volume, temporal coverage, fare/distance distributions, and top routes.\nEach query gets an explicit pickup-date filter so it stays inside the validated window.",
+      },
+      { kind: "tool", title: "Edited", asset: NB, status: "failure", ms: 3000 },
+      { kind: "tool", title: "Edited", asset: NB, status: "success", ms: 2500 },
+      { kind: "tool", title: "Edited", asset: NB, status: "success", ms: 2500 },
     ],
   },
   {
     kind: "prose",
+    ms: 3000,
+    text: "Now I'll run all code cells. I'll run the first few cells concurrently to warm up compute:",
+  },
+  {
+    kind: "stepGroup",
+    children: [
+      { kind: "tool", title: "Edited", asset: NB, status: "success", ms: 2500 },
+      { kind: "tool", title: "Edited", asset: NB, status: "success", ms: 2500 },
+    ],
+  },
+  {
+    kind: "prose",
+    ms: 3500,
     text: "The table has 21,932 trips (Jan–Feb 2016), 128 pickup zips, 0 null distance/fare. Now running the remaining analysis cells:",
   },
   {
     kind: "stepGroup",
     children: [
-      { kind: "tool", title: "Ran 9 cells", asset: NB, status: "success" },
-      { kind: "thoughts", text: "All cells returned. Let me verify the outputs look right before summarizing." },
+      { kind: "tool", title: "Ran 9 cells", asset: NB, status: "success", ms: 9000 },
+      { kind: "thoughts", ms: 5000, text: "All cells returned. Let me verify the outputs look right before summarizing." },
     ],
   },
-  { kind: "prose", text: "All cells ran successfully. Now renaming the notebook:" },
-  { kind: "tool", title: "Renamed \"NFL Combine Exploration\" to \"NYC Taxi Trips EDA\"", status: "success" },
+  { kind: "prose", ms: 2500, text: "All cells ran successfully. Now renaming the notebook:" },
+  {
+    kind: "tool",
+    title: "Renamed \"NFL Combine Exploration\" to \"NYC Taxi Trips EDA\"",
+    status: "success",
+    ms: 2000,
+  },
   {
     kind: "prose",
+    ms: 3000,
     text: "All 9 analysis cells are built and executed. Here's a summary of findings from NYC Taxi Trips EDA:",
   },
 ]
 
-// ─── Reveal timeline ──────────────────────────────────────────────────────────
-// Rerun replays the thread as a live stream. Every revealable atom gets a global
-// reveal index in playback order: each top-level THREAD item is an atom, and a
-// step-group's children are atoms right after the group header. A running tick
-// counter gates visibility (index < tick) and settle (index resolves at
-// index + 1, so tools show a spinner for one beat before flipping to final).
+// ─── Timeline ─────────────────────────────────────────────────────────────────
+// Every revealable atom (each top-level item, and each child of a step run) gets
+// a start/end on one shared clock, in playback order. A thought stays "active"
+// (the live Thinking state) until the next atom starts, like NativeThinking's
+// "no following content yet". Hidden thoughts are skipped entirely so they cost
+// no time.
 
-// Stable key per atom: top-level items use their THREAD index as a string;
-// step-children use "parentIndex.childIndex".
+const GAP_MS = 500 // pause between atoms
+const PROMPT_MS = 1000 // beat after the user prompt before Genie starts
+
 function topKey(i: number) {
   return String(i)
 }
@@ -203,194 +448,183 @@ function childKey(parent: number, child: number) {
   return `${parent}.${child}`
 }
 
-// Build key → reveal index in playback order.
-const REVEAL_INDEX: Record<string, number> = (() => {
-  const map: Record<string, number> = {}
-  let n = 0
+type Atom = { start: number; end: number; activeEnd: number }
+type Timeline = { atoms: Record<string, Atom>; total: number }
+
+function buildTimeline(showThoughts: boolean): Timeline {
+  const atoms: Record<string, Atom> = {}
+  const order: string[] = []
+  let t = 0
+  const add = (key: string, ms: number) => {
+    atoms[key] = { start: t, end: t + ms, activeEnd: t + ms }
+    order.push(key)
+    if (ms) t += ms + GAP_MS
+  }
   THREAD.forEach((item, i) => {
-    map[topKey(i)] = n++
     if (item.kind === "stepGroup") {
-      item.children.forEach((_, c) => {
-        map[childKey(i, c)] = n++
+      item.children.forEach((child, c) => {
+        if (showThoughts || child.kind !== "thoughts") add(childKey(i, c), child.ms)
       })
+      return
     }
+    if (item.kind === "thoughts" && !showThoughts) return
+    add(topKey(i), item.kind === "runHeader" ? 0 : item.kind === "userPrompt" ? PROMPT_MS : item.ms)
   })
-  return map
-})()
-
-// Total beats = every atom + a trailing settle beat so the last tool flips.
-const TOTAL_BEATS = Object.keys(REVEAL_INDEX).length + 2
-const BEAT_MS = 2100
-
-type RevealState = {
-  active: boolean // a replay is currently playing (or was just played)
-  tick: number // how many beats have elapsed; Infinity when idle/settled
+  order.forEach((key, n) => {
+    const next = order[n + 1]
+    if (next) atoms[key].activeEnd = atoms[next].start
+  })
+  return { atoms, total: t }
 }
 
-const RevealContext = createContext<RevealState>({ active: false, tick: Infinity })
-const useReveal = () => useContext(RevealContext)
+type TimelineState = { now: number; atoms: Record<string, Atom> }
 
-// True if the atom at `key` should be shown yet.
-function isVisible(reveal: RevealState, key: string): boolean {
-  if (!reveal.active) return true
-  const idx = REVEAL_INDEX[key]
-  return idx === undefined || idx < reveal.tick
+const TimelineContext = createContext<TimelineState>({ now: Infinity, atoms: {} })
+const useTimeline = () => useContext(TimelineContext)
+
+// Atoms without an entry (containers) are always visible / settled.
+function isVisible(tl: TimelineState, key: string): boolean {
+  const a = tl.atoms[key]
+  return !a || tl.now >= a.start
 }
 
-// True once the timeline has passed the atom's resolve beat (reveal + 1), i.e.
-// a tool has finished running and can show its final status.
-function isSettled(reveal: RevealState, key: string): boolean {
-  if (!reveal.active) return true
-  const idx = REVEAL_INDEX[key]
-  return idx === undefined || idx + 1 < reveal.tick
+// A tool has finished running and can show its final status.
+function isSettled(tl: TimelineState, key: string): boolean {
+  const a = tl.atoms[key]
+  return !a || tl.now >= a.end
 }
 
-// Drives the shared timeline for all cards. rerun() restarts from 0.
-function useReplay() {
-  const [state, setState] = useState<RevealState>({ active: false, tick: Infinity })
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+// A thought is the live Thinking state.
+function isActive(tl: TimelineState, key: string): boolean {
+  const a = tl.atoms[key]
+  return !!a && tl.now >= a.start && tl.now < a.activeEnd
+}
 
-  const stop = () => {
-    if (timer.current) {
-      clearInterval(timer.current)
-      timer.current = null
+// The portion of `text` streamed so far.
+function streamedText(tl: TimelineState, key: string, text: string): string {
+  const a = tl.atoms[key]
+  if (!a || a.end <= a.start) return text
+  const f = Math.min(1, Math.max(0, (tl.now - a.start) / (a.end - a.start)))
+  return text.slice(0, Math.floor(f * text.length))
+}
+
+function elapsedSec(tl: TimelineState, key: string): number {
+  const a = tl.atoms[key]
+  return a ? Math.max(0, (tl.now - a.start) / 1000) : 0
+}
+
+// ─── Playback ─────────────────────────────────────────────────────────────────
+// A requestAnimationFrame clock over the timeline. Plays on load, stops at the
+// end (so the settled thread stays put; `playing` is derived, so reaching the
+// end halts the loop), and pauses its own advance while the scrubber is held. `runId` bumps on Restart so cards remount with fresh
+// expand/collapse state.
+
+const SPEEDS = [1, 2, 4, 8] as const
+
+function usePlayback(total: number) {
+  const [now, setNow] = useState(0)
+  const [wantPlaying, setWantPlaying] = useState(true)
+  const playing = wantPlaying && now < total
+  const [speed, setSpeed] = useState(1)
+  const [runId, setRunId] = useState(0)
+  const scrubbing = useRef(false)
+
+  useEffect(() => {
+    if (!playing) return
+    let raf = 0
+    let last = performance.now()
+    const step = (ts: number) => {
+      const dt = ts - last
+      last = ts
+      if (!scrubbing.current) setNow((n) => Math.min(total, n + dt * speed))
+      raf = requestAnimationFrame(step)
     }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [playing, speed, total])
+
+  const restart = () => {
+    setNow(0)
+    setRunId((r) => r + 1)
+    setWantPlaying(true)
+  }
+  const toggle = () => {
+    if (now >= total) restart()
+    else setWantPlaying(!playing)
+  }
+  const seek = (ms: number) => setNow(Math.min(total, Math.max(0, ms)))
+  const setScrubbing = (v: boolean) => {
+    scrubbing.current = v
   }
 
-  const rerun = () => {
-    stop()
-    setState({ active: true, tick: 0 })
-    timer.current = setInterval(() => {
-      setState((s) => {
-        const next = s.tick + 1
-        if (next >= TOTAL_BEATS) {
-          stop()
-          // Settle: keep active so nothing snaps, but reveal everything.
-          return { active: true, tick: Infinity }
-        }
-        return { active: true, tick: next }
-      })
-    }, BEAT_MS)
-  }
-
-  useEffect(() => stop, [])
-
-  return { state, rerun }
+  return { now: Math.min(now, total), playing, speed, runId, setSpeed, restart, toggle, seek, setScrubbing }
 }
 
 // ─── Genie mark ───────────────────────────────────────────────────────────────
-// Static Genie lamp mark (no animation) — used as a leading icon, e.g. before the
-// "Thought process" step-group label. Same geometry as GenieSpinner.
+// Port of universe's GenieCodeAnimatingIcon (notebook/common/assistant) — the
+// Genie Code lamp glyph in the AI gradient. `animated` spins the star around its
+// center (8,5) at 2.4s linear, matching the ThinkingState / NativeThinking loader.
 
-function GenieMark({ size = 16, className }: { size?: number; className?: string }) {
+const LAMP_BODY =
+  "M0 8.5V7.75586C0.000200565 6.78621 0.786214 6.0002 1.75586 6H2.85645C3.22823 6 3.56811 6.21043 3.73438 6.54297L4.3291 7.73145C5.02432 9.1218 6.44551 10 8 10C9.55449 10 10.9757 9.1218 11.6709 7.73145L12.2656 6.54297L12.335 6.42383C12.5165 6.16072 12.8182 6 13.1436 6H16V7.5H13.4639L13.0127 8.40234C12.0634 10.3009 10.1226 11.5 8 11.5C5.87735 11.5 3.93661 10.3009 2.9873 8.40234L2.53613 7.5H1.75586C1.61464 7.5002 1.5002 7.61464 1.5 7.75586V8.5C1.5 8.77614 1.72386 9 2 9V10.5C0.89543 10.5 0 9.60457 0 8.5Z"
+const LAMP_BASE = "M10.5 12.5V14H5.5V12.5H10.5Z"
+const LAMP_STAR =
+  "M7.77345 3.55265L8 2.25L8.22655 3.55265C8.33504 4.17646 8.82354 4.66496 9.44735 4.77345L10.75 5L9.44735 5.22655C8.82354 5.33504 8.33504 5.82354 8.22655 6.44735L8 7.75L7.77345 6.44735C7.66496 5.82354 7.17646 5.33504 6.55265 5.22655L5.25 5L6.55265 4.77345C7.17646 4.66496 7.66496 4.17646 7.77345 3.55265Z"
+const LAMP_STAR_OUTLINE =
+  "M8 1.5C8.36452 1.5 8.67665 1.76202 8.73926 2.12109L8.96582 3.42383C9.02006 3.73573 9.26427 3.97994 9.57617 4.03418L10.8789 4.26074C11.238 4.32335 11.5 4.63548 11.5 5C11.5 5.36452 11.238 5.67665 10.8789 5.73926L9.57617 5.96582C9.26427 6.02006 9.02006 6.26427 8.96582 6.57617L8.73926 7.87891C8.67665 8.23798 8.36452 8.5 8 8.5C7.63548 8.5 7.32335 8.23798 7.26074 7.87891L7.03418 6.57617C6.97994 6.26427 6.73573 6.02006 6.42383 5.96582L5.12109 5.73926C4.76202 5.67665 4.5 5.36452 4.5 5C4.5 4.63548 4.76202 4.32335 5.12109 4.26074L6.42383 4.03418C6.73573 3.97994 6.97994 3.73573 7.03418 3.42383L7.26074 2.12109L7.2959 1.99121C7.40253 1.70057 7.6811 1.5 8 1.5ZM8 4.76367C7.92717 4.8482 7.8482 4.92717 7.76367 5C7.84802 5.07267 7.9273 5.15103 8 5.23535C8.07254 5.15122 8.15122 5.07254 8.23535 5C8.15103 4.9273 8.07267 4.84802 8 4.76367Z"
+
+function GenieLamp({
+  size = 16,
+  animated = false,
+  className,
+}: {
+  size?: number
+  animated?: boolean
+  className?: string
+}) {
+  // Unique per instance so multiple lamps on the page don't share one gradient.
+  const gradientId = `genie-ai-gradient-${useId().replace(/:/g, "")}`
+  const fill = `url(#${gradientId})`
+  const starClass = animated ? "genie-lamp-star" : undefined
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="-2 3 52 52"
-      shapeRendering="geometricPrecision"
-      textRendering="geometricPrecision"
+      viewBox="0 0 16 16"
       width={size}
       height={size}
-      preserveAspectRatio="xMidYMid meet"
-      role="presentation"
+      fill="none"
       aria-hidden="true"
       className={cn("shrink-0", className)}
     >
-      <g transform="matrix(-0.305 0 0 0.305 23.363465 45.382455)">
-        <path
-          d="M24.72,6.616c0-7.308-4.772-13.232-10.659-13.232c0,0-28.122,0-28.122,0-5.887,0-10.659,5.924-10.659,13.232c0,0,49.44,0,49.44,0Z"
-          fill="#FF5F46"
-          strokeWidth="0"
-        />
-      </g>
-      <g transform="matrix(0.305 0 0 0.305 24 27.5)">
-        <g transform="translate(0,14.701)">
-          <path
-            d="M35.6,14.696c7.051-5.966,22.84-29.216,33.357-46.111c0,0-8.325,0-8.325,0-3.708,0-7.023,1.967-9.357,4.849-4.51,5.569-13.344,13.295-29.459,13.295c0,0-11.027,0-11.027,0-2.304,0-4.506,1.017-5.891,2.858-2.231,2.965-3.991,5.722-5.316,8.005-1.256,2.164-5.058,2.144-6.327-.014-1.37-2.328-3.229-5.15-5.654-8.181-1.384-1.73-3.511-2.668-5.727-2.668c0,0-29.657,0-29.657,0s0,.003,0,.003-2.504,0-2.504,0c-10.311,0-18.67,8.359-18.67,18.67s8.359,18.671,18.67,18.671c0-10.965-3.97-11.115-5.462-14.63-.278-.657-.432-1.394-.432-2.199c0-3.43,2.781-6.212,6.212-6.212c2.611.001,4.844,1.612,5.762,3.895c0-.019,0-.037,0-.055c6.482,15.638,21.087,26.543,38.065,26.543c24.236,0,34.692-10.754,41.742-16.719Z"
-            fill="#fabfba"
-            strokeWidth="0"
-          />
-        </g>
-      </g>
-      <g transform="matrix(0.305 0 0 0.305 24 27.5)">
-        <g transform="translate(-3.306,-27.505)">
-          <g transform="rotate(-90)">
-            <g transform="scale(-1,1) translate(0,0)">
-              <path d="M0,37.217c0-.047,0-.094,0-.142" fill="#FF5F46" strokeWidth="0" />
-              <path
-                d="M0,-37.217c.078,20.489,16.946,37.074,37.743,37.074C16.898,-0.142,0,16.521,0,37.075c0-20.554-16.898-37.217-37.742-37.217c20.796,0,37.665-16.586,37.742-37.075Z"
-                fill="#FF5F46"
-                strokeWidth="0"
-              />
-            </g>
-          </g>
-        </g>
-      </g>
+      {animated && (
+        <style>{`
+          @keyframes genie-lamp-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+          .genie-lamp-star { transform-origin: 8px 5px; animation: genie-lamp-spin 2.4s linear infinite; }
+          @media (prefers-reduced-motion: reduce) { .genie-lamp-star { animation: none; } }
+        `}</style>
+      )}
+      <defs>
+        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="20.5%" stopColor="#4299E0" />
+          <stop offset="46.91%" stopColor="#CA42E0" />
+          <stop offset="79.5%" stopColor="#FF5F46" />
+        </linearGradient>
+      </defs>
+      <path fill={fill} d={LAMP_BODY} />
+      <path fill={fill} d={LAMP_BASE} />
+      <path className={starClass} fill={fill} d={LAMP_STAR} />
+      <path className={starClass} fill={fill} d={LAMP_STAR_OUTLINE} />
     </svg>
   )
 }
 
 // ─── Genie spinner ────────────────────────────────────────────────────────────
-// The Genie lamp mark used as the "working" indicator (replaces the generic CSS
-// spinner). The sparkle rotates and the wisp pulses; keyframes are scoped to the
-// gs- class names so they don't collide with anything else on the page.
+// The "working" indicator: the lamp with its star spinning.
 
 function GenieSpinner({ size = 16 }: { size?: number }) {
   return (
     <span className="inline-flex shrink-0" style={{ width: size, height: size }} aria-label="Working">
-      <style>{`
-        @keyframes gs-spin { to { transform: rotate(360deg); } }
-        @keyframes gs-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
-        .gs-sparkle { animation: gs-spin 1.6s linear infinite; transform-box: fill-box; transform-origin: center; }
-        .gs-wisp { animation: gs-pulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-        @media (prefers-reduced-motion: reduce) {
-          .gs-sparkle, .gs-wisp { animation: none; }
-        }
-      `}</style>
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="-2 3 52 52"
-        shapeRendering="geometricPrecision"
-        textRendering="geometricPrecision"
-        width={size}
-        height={size}
-        preserveAspectRatio="xMidYMid meet"
-        role="presentation"
-        aria-hidden="true"
-      >
-        <g transform="matrix(-0.305 0 0 0.305 23.363465 45.382455)">
-          <path
-            d="M24.72,6.616c0-7.308-4.772-13.232-10.659-13.232c0,0-28.122,0-28.122,0-5.887,0-10.659,5.924-10.659,13.232c0,0,49.44,0,49.44,0Z"
-            fill="#FF5F46"
-            strokeWidth="0"
-          />
-        </g>
-        <g transform="matrix(0.305 0 0 0.305 24 27.5)">
-          <g transform="translate(0,14.701)" className="gs-wisp">
-            <g transform="translate(0,0)">
-              <path
-                d="M35.6,14.696c7.051-5.966,22.84-29.216,33.357-46.111c0,0-8.325,0-8.325,0-3.708,0-7.023,1.967-9.357,4.849-4.51,5.569-13.344,13.295-29.459,13.295c0,0-11.027,0-11.027,0-2.304,0-4.506,1.017-5.891,2.858-2.231,2.965-3.991,5.722-5.316,8.005-1.256,2.164-5.058,2.144-6.327-.014-1.37-2.328-3.229-5.15-5.654-8.181-1.384-1.73-3.511-2.668-5.727-2.668c0,0-29.657,0-29.657,0s0,.003,0,.003-2.504,0-2.504,0c-10.311,0-18.67,8.359-18.67,18.67s8.359,18.671,18.67,18.671c0-10.965-3.97-11.115-5.462-14.63-.278-.657-.432-1.394-.432-2.199c0-3.43,2.781-6.212,6.212-6.212c2.611.001,4.844,1.612,5.762,3.895c0-.019,0-.037,0-.055c6.482,15.638,21.087,26.543,38.065,26.543c24.236,0,34.692-10.754,41.742-16.719Z"
-                fill="#fabfba"
-                strokeWidth="0"
-              />
-            </g>
-          </g>
-        </g>
-        <g transform="matrix(0.305 0 0 0.305 24 27.5)">
-          <g transform="translate(-3.306,-27.505)" className="gs-sparkle">
-            <g transform="rotate(-90)">
-              <g transform="scale(-1,1) translate(0,0)">
-                <path d="M0,37.217c0-.047,0-.094,0-.142" fill="#FF5F46" strokeWidth="0" />
-                <path
-                  d="M0,-37.217c.078,20.489,16.946,37.074,37.743,37.074C16.898,-0.142,0,16.521,0,37.075c0-20.554-16.898-37.217-37.742-37.217c20.796,0,37.665-16.586,37.742-37.075Z"
-                  fill="#FF5F46"
-                  strokeWidth="0"
-                />
-              </g>
-            </g>
-          </g>
-        </g>
-      </svg>
+      <GenieLamp size={size} animated />
     </span>
   )
 }
@@ -447,69 +681,499 @@ function glyphVisible(status: ToolStatus, props: PlaygroundProps): boolean {
   return true // running / pendingOutput
 }
 
+// Trailing cluster on a tool row: optional running timer, then the status glyph.
+// `after` renders last (the minimal row's expand chevron).
+function ToolTrailing({
+  status,
+  elapsed,
+  showGlyph,
+  props,
+  after,
+}: {
+  status: ToolStatus
+  elapsed?: number
+  showGlyph: boolean
+  props: PlaygroundProps
+  after?: React.ReactNode
+}) {
+  const showTimer = props.showToolTimer && status === "running" && elapsed !== undefined
+  if (!showGlyph && !showTimer && !after) return null
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5">
+      {showTimer && (
+        <span className="text-hint tabular-nums text-muted-foreground">{formatElapsed(elapsed)}</span>
+      )}
+      {showGlyph && <StatusGlyph status={status} size={16} />}
+      {after}
+    </span>
+  )
+}
+
+// ─── Tool detail ──────────────────────────────────────────────────────────────
+// The expanded body of a query tool, as in Genie Code: a grey block with a
+// status line ("Running… Tasks ▰▰▰" while live; "✓ 2:48 PM (17s)" + copy when
+// done), the highlighted SQL, then the result grid + row count on success or
+// an error line on failure.
+
+// Wall-clock time the replay "starts", so finished tools can stamp a time.
+const RUN_STARTED_AT = new Date(2026, 8, 25, 14, 46, 0).getTime()
+
+function clockLabel(offsetMs: number): string {
+  return new Date(RUN_STARTED_AT + offsetMs).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
+type ToolTiming = { clock: string; seconds: number }
+
+const SQL_KEYWORDS = new Set(["SELECT", "FROM", "WHERE", "ORDER", "BY", "ASC", "DESC", "LIMIT"])
+
+// Minimal SQL highlighter: keywords, numbers, and catalog/schema qualifiers
+// (any identifier followed by a dot).
+function highlightSql(sql: string): React.ReactNode[] {
+  const tokens = sql.match(/\s+|\w+|[^\w\s]/g) ?? []
+  return tokens.map((tok, i) => {
+    let cls = ""
+    if (/^[A-Za-z]+$/.test(tok) && SQL_KEYWORDS.has(tok.toUpperCase())) cls = "text-primary"
+    else if (/^\d+$/.test(tok)) cls = "text-green-600"
+    else if (/^\w+$/.test(tok) && tokens[i + 1] === ".") cls = "text-brown-500"
+    else if (tok === "*" || tok === ".") cls = "text-muted-foreground"
+    return cls ? (
+      <span key={i} className={cls}>
+        {tok}
+      </span>
+    ) : (
+      tok
+    )
+  })
+}
+
+// Indeterminate striped bar shown next to "Tasks" while a query runs.
+function StripedProgress() {
+  return (
+    <span className="tool-progress inline-block h-2 w-[200px] min-w-0 shrink rounded-full" aria-hidden="true">
+      <style>{`
+        @keyframes tool-progress-slide { to { background-position: 16px 0; } }
+        .tool-progress {
+          background-color: var(--color-blue-600);
+          background-image: linear-gradient(-45deg, var(--color-blue-800) 25%, transparent 25%,
+            transparent 50%, var(--color-blue-800) 50%, var(--color-blue-800) 75%, transparent 75%);
+          background-size: 16px 16px;
+          animation: tool-progress-slide .8s linear infinite;
+        }
+        @media (prefers-reduced-motion: reduce) { .tool-progress { animation: none; } }
+      `}</style>
+    </span>
+  )
+}
+
+const COLUMN_TYPE_ICON: Record<ColumnType, IconComponent> = {
+  timestamp: CalendarClockIcon,
+  double: DecimalIcon,
+  int: HashIcon,
+}
+
+function ResultGrid({ result }: { result: QueryResult }) {
+  return (
+    <div className="border-t border-border bg-background">
+      {/* ~5 rows tall; scrolls both ways like the notebook result grid */}
+      <div className="max-h-[216px] overflow-y-auto">
+        <Table className="w-max min-w-full">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12 border-r border-border" />
+              {result.columns.map((c) => (
+                <TableHead
+                  key={c.name}
+                  className="border-r border-border font-semibold whitespace-nowrap text-foreground"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <DbIcon icon={COLUMN_TYPE_ICON[c.type]} size={16} className="text-muted-foreground" />
+                    {c.name}
+                  </span>
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {result.rows.map((row, r) => (
+              <TableRow key={r}>
+                <TableCell className="border-r border-border text-center tabular-nums text-muted-foreground">
+                  {r + 1}
+                </TableCell>
+                {row.map((v, c) => (
+                  <TableCell
+                    key={c}
+                    className="border-r border-border whitespace-nowrap tabular-nums text-foreground"
+                  >
+                    {v}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex items-center gap-2 border-t border-border px-2 py-1.5">
+        <Button variant="ghost" size="icon-xs" aria-label="Download results" className="text-muted-foreground">
+          <DbIcon icon={DownloadIcon} size={16} />
+        </Button>
+        <span className="text-sm text-foreground">{result.rows.length} rows</span>
+      </div>
+    </div>
+  )
+}
+
+// `flush` = rendered inside a contained tool card: fills the card edge to edge
+// (no radius, no side borders, just a divider under the card header).
+function ToolDetailBlock({
+  detail,
+  status,
+  timing,
+  flush = false,
+}: {
+  detail: ToolDetail
+  status: ToolStatus
+  timing?: ToolTiming
+  flush?: boolean
+}) {
+  const running = status === "running"
+  const copy = () => {
+    navigator.clipboard?.writeText(detail.sql).catch(() => {})
+  }
+  return (
+    <div
+      className={cn(
+        "overflow-hidden bg-secondary",
+        flush ? "border-t border-border" : "rounded-md border border-border",
+      )}
+    >
+      <div className="flex flex-col gap-1 px-3 py-2.5">
+        <div className="flex min-h-6 items-center gap-2 text-sm text-muted-foreground">
+          {running ? (
+            <>
+              <span>Running…</span>
+              <span>Tasks</span>
+              <StripedProgress />
+            </>
+          ) : (
+            <>
+              <StatusGlyph status={status} size={16} />
+              {timing && (
+                <span className="tabular-nums">
+                  {timing.clock} ({timing.seconds}s)
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={copy}
+                aria-label="Copy query"
+                className="ml-auto text-muted-foreground"
+              >
+                <DbIcon icon={CopyIcon} size={16} />
+              </Button>
+            </>
+          )}
+        </div>
+        <pre className="overflow-x-auto font-mono text-sm leading-5 text-foreground">
+          {/* Block code: drop the global inline-code chip (bg, padding, radius). */}
+          <code className="rounded-none bg-transparent p-0 font-normal">{highlightSql(detail.sql)}</code>
+        </pre>
+      </div>
+      {!running && status === "success" && detail.result && <ResultGrid result={detail.result} />}
+      {!running && status === "failure" && detail.error && (
+        <div className="border-t border-border bg-background px-3 py-2 text-sm text-foreground">
+          {detail.error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Whether a tool renders as a contained card in the current Tool UI mode. In
+// "mix", only expandable tools get the card; the rest stay minimal.
+function isContained(props: PlaygroundProps, expandable: boolean): boolean {
+  return (
+    props.toolMode === "contained" ||
+    props.toolMode === "combined" ||
+    (props.toolMode === "mix" && expandable)
+  )
+}
+
+// A run's shared card (combined mode, and stacked repeated-tool groups).
+const STACK_CARD = "flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border bg-background"
+// Padding for a non-tool row (a thought) sitting inside a STACK_CARD.
+const STACK_ROW = "px-2.5 py-1.5"
+
 function ToolAction({
   title,
   asset,
   status,
+  elapsed,
+  detail,
+  timing,
+  stacked = false,
   props,
 }: {
   title: string
   asset?: AssetRef
   status: ToolStatus
+  // Seconds the tool has been running; shown left of the spinner while it runs.
+  elapsed?: number
+  // Expandable body. Only tools with a detail get a chevron and a click target.
+  detail?: ToolDetail
+  timing?: ToolTiming
+  // Row inside a stacked group card: the group owns the border and dividers.
+  stacked?: boolean
   props: PlaygroundProps
 }) {
-  // In "mix", tool actions render as contained cards (prose/thoughts stay inline).
-  const contained = props.toolMode === "contained" || props.toolMode === "mix"
-  const showGlyph = glyphVisible(status, props)
+  const [open, setOpen] = useState(false)
+  const expandable = detail !== undefined
+  const contained = isContained(props, expandable)
+  const running = status === "running"
+  // Once expanded, a finished tool's status moves into the detail header.
+  const showGlyph = glyphVisible(status, props) && !(open && !running)
+  const chevron = (
+    <ChevronRightIcon
+      size={14}
+      className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+    />
+  )
+  const body = (flush: boolean) =>
+    open &&
+    detail && <ToolDetailBlock detail={detail} status={status} timing={timing} flush={flush} />
 
   if (!contained) {
-    // Minimal: flat grey inline line + trailing status glyph
+    // Minimal: flat grey inline line; trailing timer / glyph, then the chevron
+    // (hidden while running — the spinner holds that spot).
+    const trailing = (
+      <ToolTrailing
+        status={status}
+        elapsed={elapsed}
+        showGlyph={showGlyph}
+        props={props}
+        after={expandable && !running ? chevron : undefined}
+      />
+    )
+    if (!expandable) {
+      return (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="min-w-0 truncate">{title}</span>
+          {asset && <AssetChip asset={asset} />}
+          {trailing}
+        </div>
+      )
+    }
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className="min-w-0 truncate">{title}</span>
-        {asset && <AssetChip asset={asset} />}
-        {showGlyph && <span className="ml-auto shrink-0"><StatusGlyph status={status} size={16} /></span>}
+      <div className="flex flex-col gap-1.5">
+        <Button
+          variant="ghost"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className={cn(ROW_BUTTON, "w-full gap-2 py-0")}
+        >
+          <span className="min-w-0 truncate">{title}</span>
+          {asset && <AssetChip asset={asset} />}
+          {trailing}
+        </Button>
+        {body(false)}
       </div>
     )
   }
 
-  // Contained: bordered "Tool action" card — leading chevron, title, trailing status
-  return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm">
-      <ChevronRightIcon size={14} className="shrink-0 text-muted-foreground" />
+  // Contained: bordered "Tool action" card — leading chevron (expandable tools
+  // only), title, trailing status. The detail renders inside the same card.
+  const header = (
+    <>
+      {expandable && chevron}
       <span className="min-w-0 truncate text-foreground">{title}</span>
       {asset && <AssetChip asset={asset} />}
-      {showGlyph && <span className="ml-auto shrink-0"><StatusGlyph status={status} size={16} /></span>}
+      <ToolTrailing status={status} elapsed={elapsed} showGlyph={showGlyph} props={props} />
+    </>
+  )
+  return (
+    <div
+      className={cn(
+        "bg-background text-sm",
+        !stacked && "overflow-hidden rounded-md border border-border",
+      )}
+    >
+      {expandable ? (
+        <Button
+          variant="ghost"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          // Whole header takes the DuBois action hover; the card's overflow-hidden
+          // rounds its top corners.
+          className="h-auto w-full justify-start gap-2 rounded-none px-2.5 py-1.5 text-sm font-normal hover:bg-[var(--action-default-bg-hover)] has-[>svg]:px-2.5 dark:hover:bg-[var(--action-default-bg-hover)]"
+        >
+          {header}
+        </Button>
+      ) : (
+        <div className="flex items-center gap-2 px-2.5 py-1.5">{header}</div>
+      )}
+      {body(true)}
     </div>
   )
 }
 
-// ─── Thoughts block ───────────────────────────────────────────────────────────
-// A collapsible thought. Collapsed shows the first line of the actual thought
-// text (truncated to one line with a trailing chevron); expanded shows the full
-// text, wrapping. Default collapsed.
+// ─── Thinking dots ────────────────────────────────────────────────────────────
+// The trailing "…" on a live Thinking label: three dots blinking in sequence.
 
-function ThoughtsBlock({ text }: { text: string }) {
-  const [open, setOpen] = useState(false)
+function ThinkingDots() {
   return (
-    <Button
-      variant="ghost"
-      onClick={() => setOpen((o) => !o)}
-      className="h-auto w-full items-start justify-start gap-1 whitespace-normal px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
-    >
-      <span
-        className={cn(
-          "min-w-0 flex-1 text-left",
-          open ? "whitespace-normal break-words" : "truncate"
-        )}
+    <span className="thinking-dots ml-0.5 inline-block w-4 text-left tracking-[1px]" aria-hidden="true">
+      <style>{`
+        @keyframes thinking-dot { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
+        .thinking-dots > span { opacity: .3; animation: thinking-dot 1.4s infinite both; }
+        .thinking-dots > span:nth-of-type(2) { animation-delay: .2s; }
+        .thinking-dots > span:nth-of-type(3) { animation-delay: .4s; }
+        @media (prefers-reduced-motion: reduce) {
+          .thinking-dots > span { animation: none; opacity: .7; }
+        }
+      `}</style>
+      <span>.</span>
+      <span>.</span>
+      <span>.</span>
+    </span>
+  )
+}
+
+// Shared class for the grey, borderless clickable header rows in the thread.
+const ROW_BUTTON =
+  "h-auto justify-start gap-1.5 px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
+
+// Container for an expanded step list. Today mirrors production: flush, no rule.
+// Proposed follows props.indentSteps.
+function nestedStepsClass(props: PlaygroundProps, variant: Variant): string {
+  return variant === "proposed" && props.indentSteps ? "ml-2 border-l border-border pl-3" : ""
+}
+
+// Proposed loader label, escalating with how long the thought has run.
+function thinkingLabel(sec: number, props: PlaygroundProps): string {
+  if (sec >= props.takingLongerAfter) return "Taking longer"
+  if (sec >= props.stillThinkingAfter) return "Still thinking"
+  return "Thinking"
+}
+
+function formatElapsed(sec: number): string {
+  const s = Math.floor(sec)
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+// ─── Thoughts block ───────────────────────────────────────────────────────────
+// One reasoning atom, rendered per option:
+//   Today    — live: lamp + "Thinking…", body open and streaming. Done: auto-
+//              collapses to "Thoughts: <first line> ›"; expanded "› Thoughts".
+//   Proposed — live: lamp + escalating label + timer ›, body closed. Done:
+//              "Thought ›". Expand any time to watch or read the reasoning.
+
+function ThoughtBlock({
+  text,
+  revealKey,
+  variant,
+  props,
+  stacked = false,
+}: {
+  text: string
+  revealKey: string
+  variant: Variant
+  props: PlaygroundProps
+  // Row inside a combined card: takes row padding; the card owns borders.
+  stacked?: boolean
+}) {
+  const tl = useTimeline()
+  const active = isActive(tl, revealKey)
+  const [override, setOverride] = useState<boolean | null>(null)
+  const [wasActive, setWasActive] = useState(active)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  // Today auto-collapses once the thought finishes (NativeThinking), dropping any
+  // toggle made while it streamed. Proposed keeps whatever the user chose.
+  if (wasActive !== active) {
+    setWasActive(active)
+    if (!active && variant === "today") setOverride(null)
+  }
+
+  const open = override ?? (variant === "today" && active)
+  const shown = active ? streamedText(tl, revealKey, text) : text
+
+  // Keep the newest streamed line in view while the body is open.
+  useEffect(() => {
+    if (active && open && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+  }, [active, open, shown])
+
+  const sec = elapsedSec(tl, revealKey)
+  const firstLine = text.split("\n")[0].trim()
+  const chevron = (
+    <ChevronRightIcon size={14} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+  )
+
+  let header: React.ReactNode
+  if (active && variant === "today") {
+    header = (
+      <>
+        <GenieSpinner size={16} />
+        <span>
+          Thinking
+          <ThinkingDots />
+        </span>
+      </>
+    )
+  } else if (active) {
+    header = (
+      <>
+        <GenieSpinner size={16} />
+        <span>
+          {thinkingLabel(sec, props)}
+          <ThinkingDots />
+        </span>
+        <span className="tabular-nums">· {formatElapsed(sec)}</span>
+        {chevron}
+      </>
+    )
+  } else if (variant === "today") {
+    header = open ? (
+      <>
+        {chevron}
+        <span>Thoughts</span>
+      </>
+    ) : (
+      <>
+        <span className="min-w-0 truncate">Thoughts: {firstLine}</span>
+        {chevron}
+      </>
+    )
+  } else {
+    header = (
+      <>
+        <span>Thought</span>
+        {chevron}
+      </>
+    )
+  }
+
+  return (
+    <div className={cn("flex min-w-0 flex-col", stacked && STACK_ROW)}>
+      <Button
+        variant="ghost"
+        onClick={() => setOverride(!open)}
+        aria-expanded={open}
+        className={cn(ROW_BUTTON, "w-full min-w-0")}
       >
-        {text}
-      </span>
-      <ChevronRightIcon
-        size={14}
-        className={cn("mt-0.5 shrink-0 transition-transform", open && "rotate-90")}
-      />
-    </Button>
+        {header}
+      </Button>
+      {open && (
+        <div
+          ref={bodyRef}
+          className="mt-1 max-h-[200px] overflow-y-auto whitespace-pre-wrap break-words text-hint text-muted-foreground [scrollbar-width:none]"
+        >
+          {shown}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -524,13 +1188,15 @@ function ToolRunGroup({
   indices,
   steps,
   props,
+  variant,
 }: {
   parent: number
   indices: number[]
   steps: StepChild[]
   props: PlaygroundProps
+  variant: Variant
 }) {
-  const reveal = useReveal()
+  const tl = useTimeline()
   const [open, setOpen] = useState(false)
 
   const first = steps[indices[0]]
@@ -540,33 +1206,86 @@ function ToolRunGroup({
   // "Last wins": the row glyph is the last call's effective status.
   const lastStatus: ToolStatus =
     last.kind === "tool"
-      ? isSettled(reveal, childKey(parent, lastIdx))
+      ? isSettled(tl, childKey(parent, lastIdx))
         ? last.status
         : "running"
       : "success"
   const showGlyph = glyphVisible(lastStatus, props)
+  const lastElapsed =
+    lastStatus === "running" ? elapsedSec(tl, childKey(parent, lastIdx)) : undefined
+  // When every call renders as a card, stack them into one card with dividers
+  // so the run reads as a single tool with line items.
+  const stacked = indices.every((c) => {
+    const step = steps[c]
+    return step.kind === "tool" && isContained(props, step.detail !== undefined)
+  })
+
+  const header = (
+    <>
+      <span className="min-w-0 truncate">{title}</span>
+      <span className="shrink-0 text-muted-foreground">×{indices.length}</span>
+      <ChevronRightIcon size={14} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+      <ToolTrailing status={lastStatus} elapsed={lastElapsed} showGlyph={showGlyph} props={props} />
+    </>
+  )
+
+  // Combined: the group is a row in the run's card; expanding adds the calls as
+  // indented rows directly below it, in the same card with the same dividers.
+  if (props.toolMode === "combined") {
+    return (
+      <div className="flex flex-col divide-y divide-border">
+        <Button
+          variant="ghost"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="h-auto w-full justify-start gap-2 rounded-none px-2.5 py-1.5 text-sm font-normal text-foreground hover:bg-[var(--action-default-bg-hover)] hover:text-foreground has-[>svg]:px-2.5 dark:hover:bg-[var(--action-default-bg-hover)]"
+        >
+          {header}
+        </Button>
+        {open &&
+          indices.map((c) => (
+            <div key={c} className="pl-5">
+              <ThreadItemView
+                item={steps[c]}
+                revealKey={childKey(parent, c)}
+                props={props}
+                variant={variant}
+                stacked
+              />
+            </div>
+          ))}
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-2.5">
       <Button
         variant="ghost"
         onClick={() => setOpen((o) => !o)}
-        className="h-auto w-full justify-start gap-2 px-0 py-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
+        className={cn(ROW_BUTTON, "w-full gap-2 py-0")}
       >
-        <span className="min-w-0 truncate">{title}</span>
-        <span className="shrink-0 text-muted-foreground">×{indices.length}</span>
-        <ChevronRightIcon size={14} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
-        {showGlyph && (
-          <span className="ml-auto shrink-0">
-            <StatusGlyph status={lastStatus} size={16} />
-          </span>
-        )}
+        {header}
       </Button>
       {open && (
-        <div className="ml-2 flex flex-col gap-2.5 border-l border-border pl-3">
-          {indices.map((c) => (
-            <ThreadItemView key={c} item={steps[c]} revealKey={childKey(parent, c)} props={props} />
-          ))}
+        <div className={nestedStepsClass(props, variant)}>
+          <div
+            className={cn(
+              "flex flex-col",
+              stacked ? STACK_CARD : "gap-2.5",
+            )}
+          >
+            {indices.map((c) => (
+              <ThreadItemView
+                key={c}
+                item={steps[c]}
+                revealKey={childKey(parent, c)}
+                props={props}
+                variant={variant}
+                stacked={stacked}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -598,136 +1317,138 @@ function segmentSteps(indices: number[], steps: StepChild[]): number[][] {
   return segments
 }
 
+function stepsLabel(n: number) {
+  return `${n} step${n === 1 ? "" : "s"}`
+}
+
 // ─── Step group ───────────────────────────────────────────────────────────────
-// Owns the thoughts/tools it hides. `parent` is the group's THREAD index.
+// A run of thoughts/tools between prose lines. `parent` is its THREAD index.
 //
-// Settled/idle (both densities): collapses to "Thought process (N steps) ▸",
-// expandable to all steps.
+// Sealed (the next prose line has appeared): ≥2 steps fold into "N steps ›",
+// collapsed by default (FoldedToolCalls); a lone step renders as itself.
 //
-// Streaming header (both densities): a "Thinking… (N)" row with the Genie loader,
-// N = completed steps so far, running up as steps settle. Clickable to expand.
-//
-// Streaming body:
-//   • full  (A) — auto-expands and shows ALL revealed steps.
-//   • focus (B) — shows only the single LIVE step (the newest revealed child);
-//     completed steps are hidden and roll up behind the header, appearing above
-//     the live step only when the header is expanded.
+// Streaming, by props.density:
+//   • flat  — every revealed step shows, flat.
+//   • focus — only the live (newest) step shows; finished steps roll up behind
+//             the same "N steps ›" header above it, so sealing is seamless.
 
 function StepGroup({
   parent,
   steps,
   props,
-  focus = false,
+  variant,
 }: {
   parent: number
   steps: StepChild[]
   props: PlaygroundProps
-  focus?: boolean
+  variant: Variant
 }) {
-  const reveal = useReveal()
-  const [userOpen, setUserOpen] = useState(false)
+  const tl = useTimeline()
+  const [open, setOpen] = useState(false)
 
-  const lastChildKey = childKey(parent, steps.length - 1)
-  const streaming = reveal.active && !isSettled(reveal, lastChildKey)
-
-  // Indices of revealed children, and how many have settled (the running count).
-  const revealed = steps.map((_, c) => c).filter((c) => isVisible(reveal, childKey(parent, c)))
-  const completedCount = steps.filter((_, c) => isSettled(reveal, childKey(parent, c))).length
+  // Children with an atom (hidden thoughts have none) that have started.
+  const revealed = steps
+    .map((_, c) => c)
+    .filter((c) => childKey(parent, c) in tl.atoms && isVisible(tl, childKey(parent, c)))
   const liveIdx = revealed.length ? revealed[revealed.length - 1] : -1
 
-  // Auto-open while streaming (full only); focus keeps completed steps hidden
-  // unless the user expands the header. Settled honors the user's toggle.
-  const bodyOpen = streaming ? (focus ? userOpen : true) : userOpen
+  const nextKey = topKey(parent + 1)
+  const sealed =
+    nextKey in tl.atoms
+      ? isVisible(tl, nextKey)
+      : liveIdx >= 0 && isSettled(tl, childKey(parent, liveIdx))
 
-  // Render a set of child indices as an indented step list (plain helper, not a
-  // component — avoids remounting the children and resetting their local state).
-  // When grouping is on, consecutive same-title tool runs (≥2) collapse into a
-  // ToolRunGroup; everything else renders as an individual item.
-  const stepList = (indices: number[]) => {
+  // Plain helper, not a component — avoids remounting children and resetting
+  // their local state. `nested` = inside an expanded fold.
+  const stepList = (indices: number[], nested: boolean) => {
     const segments = props.groupRepeatedTools
       ? segmentSteps(indices, steps)
       : indices.map((c) => [c])
-    return (
-      <div className="ml-2 flex flex-col gap-2.5 border-l border-border pl-3">
+    // Combined: the whole list is one card, one row per step.
+    const combined = props.toolMode === "combined"
+    const list = (
+      <div className={combined ? STACK_CARD : "flex flex-col gap-2.5"}>
         {segments.map((seg) =>
           seg.length > 1 ? (
-            <ToolRunGroup key={seg[0]} parent={parent} indices={seg} steps={steps} props={props} />
+            <ToolRunGroup
+              key={seg[0]}
+              parent={parent}
+              indices={seg}
+              steps={steps}
+              props={props}
+              variant={variant}
+            />
           ) : (
             <ThreadItemView
               key={seg[0]}
               item={steps[seg[0]]}
               revealKey={childKey(parent, seg[0])}
               props={props}
-              focus={focus}
+              variant={variant}
+              stacked={combined}
             />
           )
         )}
       </div>
     )
+    return nested ? <div className={nestedStepsClass(props, variant)}>{list}</div> : list
   }
 
-  // ── Streaming ──────────────────────────────────────────────────────────────
-  if (streaming) {
-    // Focus: only the newest revealed child is the "live" step; the rest are
-    // completed and hidden behind the header. Full: everything revealed shows.
-    const completedIndices = focus ? revealed.filter((c) => c !== liveIdx) : revealed
+  const foldHeader = (label: string) => (
+    <Button
+      variant="ghost"
+      onClick={() => setOpen((o) => !o)}
+      aria-expanded={open}
+      className={cn(ROW_BUTTON, "w-fit")}
+    >
+      {label}
+      <ChevronRightIcon size={14} className={cn("transition-transform", open && "rotate-90")} />
+    </Button>
+  )
+
+  if (sealed) {
+    if (revealed.length < 2) return stepList(revealed, false)
     return (
       <div className="flex flex-col gap-2.5">
-        <Button
-          variant="ghost"
-          onClick={() => setUserOpen((o) => !o)}
-          className="-ml-[3px] h-auto w-fit justify-start gap-1.5 px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
-        >
-          <GenieSpinner size={16} />
-          {/* Running count only in focus (B), gated by the global toggle, and only
-              once ≥1 step has settled; plain "Thinking…" otherwise. */}
-          {focus && props.showCompletedCount && completedCount > 0
-            ? `Thinking… (${completedCount} completed)`
-            : "Thinking…"}
-          <ChevronRightIcon size={14} className={cn("transition-transform", userOpen && "rotate-90")} />
-        </Button>
-        {/* Completed steps: always shown in full mode; only when expanded in focus */}
-        {bodyOpen && completedIndices.length > 0 && stepList(completedIndices)}
-        {/* The single live step (focus only — full already rendered it above) */}
-        {focus && liveIdx >= 0 && stepList([liveIdx])}
+        {foldHeader(stepsLabel(revealed.length))}
+        {open && stepList(revealed, true)}
       </div>
     )
   }
 
-  // ── Settled / idle ───────────────────────────────────────────────────────────
-  const settledVisible = steps.map((_, c) => c).filter((c) => isVisible(reveal, childKey(parent, c)))
+  // Today always renders flat — it mirrors production, which has no focus mode.
+  if (props.density === "flat" || variant === "today") return stepList(revealed, false)
+
+  const completed = revealed.filter((c) => c !== liveIdx)
   return (
     <div className="flex flex-col gap-2.5">
-      <Button
-        variant="ghost"
-        onClick={() => setUserOpen((o) => !o)}
-        className="-ml-[3px] h-auto w-fit justify-start gap-1.5 px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
-      >
-        <GenieMark size={16} />
-        Thought process ({steps.length} steps)
-        <ChevronRightIcon size={14} className={cn("transition-transform", userOpen && "rotate-90")} />
-      </Button>
-      {userOpen && stepList(settledVisible)}
+      {completed.length > 0 &&
+        foldHeader(props.showCompletedCount ? stepsLabel(completed.length) : "Previous steps")}
+      {open && completed.length > 0 && stepList(completed, true)}
+      {liveIdx >= 0 && stepList([liveIdx], false)}
     </div>
   )
 }
 
 // ─── Thread renderer ──────────────────────────────────────────────────────────
-// `revealKey` gates a tool's running→final status during replay. Visibility of
-// the item itself is decided by the parent (ThreadItems / StepGroup).
+// `revealKey` is the item's timeline key. Visibility of the item itself is
+// decided by the parent (Thread / StepGroup).
 
 function ThreadItemView({
   item,
   revealKey,
   props,
-  focus = false,
+  variant,
+  stacked = false,
 }: {
   item: ThreadItem
   revealKey: string
   props: PlaygroundProps
-  focus?: boolean
+  variant: Variant
+  // Row inside a shared card (combined runs, stacked ToolRunGroups).
+  stacked?: boolean
 }) {
-  const reveal = useReveal()
+  const tl = useTimeline()
   switch (item.kind) {
     case "runHeader":
       return (
@@ -750,79 +1471,65 @@ function ThreadItemView({
       )
     case "thoughts":
       if (!props.showThoughts) return null
-      return <ThoughtsBlock text={item.text} />
+      return (
+        <ThoughtBlock
+          text={item.text}
+          revealKey={revealKey}
+          variant={variant}
+          props={props}
+          stacked={stacked}
+        />
+      )
     case "tool": {
-      // Show a spinner until the timeline passes this tool's resolve beat.
-      const effectiveStatus: ToolStatus = isSettled(reveal, revealKey) ? item.status : "running"
+      // Spin until the clock passes this tool's end.
+      const settled = isSettled(tl, revealKey)
+      const atom = tl.atoms[revealKey]
       return (
         <ToolAction
           title={item.title}
           asset={item.asset}
-          status={effectiveStatus}
+          status={settled ? item.status : "running"}
+          elapsed={settled ? undefined : elapsedSec(tl, revealKey)}
+          detail={item.detail}
+          stacked={stacked}
+          timing={
+            atom
+              ? { clock: clockLabel(atom.end), seconds: Math.round((atom.end - atom.start) / 1000) }
+              : undefined
+          }
           props={props}
         />
       )
     }
     case "stepGroup":
-      return <StepGroup parent={Number(revealKey)} steps={item.children} props={props} focus={focus} />
-    case "prose":
-      return <p className="text-sm leading-5 text-foreground">{item.text}</p>
-    case "thinking":
       return (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <DbIcon icon={SparkleDoubleFillIcon} color="ai" size={16} />
-          Thinking …
-        </div>
+        <StepGroup parent={Number(revealKey)} steps={item.children} props={props} variant={variant} />
+      )
+    case "prose":
+      return (
+        <p className="text-sm leading-5 text-foreground">{streamedText(tl, revealKey, item.text)}</p>
       )
   }
 }
 
-// Render a contiguous slice of THREAD items, gating each on the reveal timeline.
-// `focus` = Option B: streaming step-groups show only the single live step.
-function ThreadItems({
-  from,
-  to,
-  props,
-  focus = false,
-}: {
-  from: number
-  to: number
-  props: PlaygroundProps
-  focus?: boolean
-}) {
-  const reveal = useReveal()
+// Every THREAD item, gated on the clock. A step run shows once its first
+// (non-hidden) child has started.
+function Thread({ props, variant }: { props: PlaygroundProps; variant: Variant }) {
+  const tl = useTimeline()
   return (
     <div className="flex flex-col gap-2.5">
-      {THREAD.slice(from, to + 1).map((item, i) => {
-        const idx = from + i
-        if (!isVisible(reveal, topKey(idx))) return null
+      {THREAD.map((item, i) => {
+        const shown =
+          item.kind === "stepGroup"
+            ? item.children.some((_, c) => childKey(i, c) in tl.atoms && isVisible(tl, childKey(i, c)))
+            : isVisible(tl, topKey(i))
+        if (!shown) return null
         return (
-          <ThreadItemView key={idx} item={item} revealKey={topKey(idx)} props={props} focus={focus} />
+          <ThreadItemView key={i} item={item} revealKey={topKey(i)} props={props} variant={variant} />
         )
       })}
     </div>
   )
-}
-
-// ─── Density: Full (Option A) ─────────────────────────────────────────────────
-// Every step, flat. The unabridged transcript — streaming groups show all steps.
-
-function ThreadFull({ props }: { props: PlaygroundProps }) {
-  return <ThreadItems from={0} to={THREAD.length - 1} props={props} />
-}
-
-// ─── Density: Focus (Option B) ────────────────────────────────────────────────
-// Same flat structure as A, but a streaming group shows only the single live
-// step (see StepGroup's focus mode). Finished steps roll up behind the
-// expandable "Thinking… (N)" header; completed run collapses like A.
-
-function ThreadFocus({ props }: { props: PlaygroundProps }) {
-  return <ThreadItems from={0} to={THREAD.length - 1} props={props} focus />
-}
-
-function Thread({ density, props }: { density: Density; props: PlaygroundProps }) {
-  if (density === "focus") return <ThreadFocus props={props} />
-  return <ThreadFull props={props} />
 }
 
 // ─── Composer ─────────────────────────────────────────────────────────────────
@@ -869,48 +1576,44 @@ function ThreadComposer() {
 }
 
 // ─── Option card ──────────────────────────────────────────────────────────────
-// Same thread + shared tool-styling props; density is intrinsic per option.
+// Same thread + shared playground props; reasoning treatment is per option.
 // Thread scrolls; the composer stays pinned at the bottom.
 
 function OptionCard({
-  label,
-  caption,
-  density,
+  option,
   props,
+  following,
   onHide,
   canHide,
 }: {
-  label: string
-  caption: string
-  density: Density
+  option: OptionDef
   props: PlaygroundProps
+  following: boolean
   onHide: () => void
   canHide: boolean
 }) {
-  const reveal = useReveal()
+  const tl = useTimeline()
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Follow the newest revealed item during a replay.
+  // Follow the newest streamed line while playing.
   useEffect(() => {
-    if (reveal.active && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [reveal.active, reveal.tick])
+    if (following && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [following, tl.now])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-col gap-3">
       <div className="flex shrink-0 items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-sm font-semibold text-foreground">{label}</span>
-          <span className="text-hint text-muted-foreground">{caption}</span>
+          <span className="text-sm font-semibold text-foreground">{option.name}</span>
+          <span className="text-hint text-muted-foreground">{option.caption}</span>
         </div>
         <Button
           variant="ghost"
           size="icon-xs"
           onClick={onHide}
           disabled={!canHide}
-          aria-label={`Hide ${label}`}
-          title={canHide ? `Hide ${label}` : "Keep at least one option visible"}
+          aria-label={`Hide ${option.name}`}
+          title={canHide ? `Hide ${option.name}` : "Keep at least one option visible"}
           className="shrink-0 text-muted-foreground"
         >
           <EyeOff className="h-4 w-4" />
@@ -919,7 +1622,7 @@ function OptionCard({
       <div className="flex min-h-0 flex-1 flex-col rounded-md border border-border bg-background p-4">
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
           <div className="mx-auto w-full max-w-[680px]">
-            <Thread density={density} props={props} />
+            <Thread props={props} variant={option.variant} />
           </div>
         </div>
         <div className="mx-auto w-full max-w-[680px]">
@@ -955,6 +1658,98 @@ function ToggleRow({
   )
 }
 
+// A whole-seconds field. Keeps a local draft so the field can be cleared while
+// typing; only positive numbers are committed.
+function SecondsRow({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  const [draft, setDraft] = useState(String(value))
+  const [synced, setSynced] = useState(value)
+  if (synced !== value) {
+    setSynced(value)
+    setDraft(String(value))
+  }
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <Label htmlFor={id} className="text-sm font-normal text-foreground">
+        {label}
+      </Label>
+      <div className="flex items-center gap-1.5">
+        <Input
+          id={id}
+          type="number"
+          min={1}
+          max={120}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            const n = Number(e.target.value)
+            if (e.target.value !== "" && Number.isFinite(n) && n > 0) onChange(n)
+          }}
+          onBlur={() => setDraft(String(value))}
+          className="h-8 w-14 text-right tabular-nums"
+        />
+        <span className="text-hint text-muted-foreground">s</span>
+      </div>
+    </div>
+  )
+}
+
+function SetupSummary({ props, onReset }: { props: PlaygroundProps; onReset: () => void }) {
+  const [copied, setCopied] = useState(false)
+  const rows = summarize(props)
+  const isDefault = rows.every((r) => !r.changed)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard can be blocked; the URL bar still holds the same link.
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border bg-background p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Summary</span>
+        {!isDefault && (
+          <Button variant="link" size="xs" onClick={onReset} className="h-auto px-0">
+            Reset
+          </Button>
+        )}
+      </div>
+      <dl className="flex flex-col gap-1">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-baseline justify-between gap-3 text-hint">
+            <dt className="text-muted-foreground">{r.label}</dt>
+            <dd className={cn("text-right text-foreground", r.changed && "font-semibold")}>
+              {r.changed && <span className="mr-1 text-primary">•</span>}
+              {r.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <span className="text-hint text-muted-foreground">
+        {isDefault ? "All defaults." : "• changed from default."} The link carries this setup.
+      </span>
+      <Button variant="default" size="xs" onClick={copy} className="gap-1.5">
+        {copied ? <Check className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
+        {copied ? "Link copied" : "Copy link"}
+      </Button>
+    </div>
+  )
+}
+
 function PlaygroundRail({
   props,
   setProps,
@@ -963,30 +1758,66 @@ function PlaygroundRail({
   setProps: (p: PlaygroundProps) => void
 }) {
   return (
-    <aside className="flex w-64 shrink-0 flex-col gap-6 border-r border-border bg-secondary/40 px-5 py-6">
+    <aside className="flex w-64 shrink-0 flex-col gap-6 overflow-y-auto border-r border-border bg-secondary/40 px-5 py-6">
       <div className="flex flex-col gap-1">
-        <span className="text-sm font-semibold text-foreground">Playground</span>
+        <span className="text-sm font-semibold text-foreground">Proposal Playground</span>
         <span className="text-hint text-muted-foreground">
-          Styles the tool &amp; step items in all options. Density is fixed per option.
+          Styles steps in both options. Step density applies to Proposed only; Today stays flat.
         </span>
       </div>
+
+      <SetupSummary props={props} onReset={() => setProps(DEFAULT_PROPS)} />
 
       {/* Tool UI mode */}
       <div className="flex flex-col gap-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tool UI</span>
-        <SegmentedControl
+        {/* A dropdown, not a segmented control: four modes don't fit the rail. */}
+        <Select
           value={props.toolMode}
           onValueChange={(v) => setProps({ ...props, toolMode: v as ToolMode })}
         >
-          <SegmentedItem value="minimal">Minimal</SegmentedItem>
-          <SegmentedItem value="contained">Contained</SegmentedItem>
-          <SegmentedItem value="mix">Mix</SegmentedItem>
-        </SegmentedControl>
+          <SelectTrigger className="h-8 w-full" aria-label="Tool UI">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(TOOL_MODE_LABEL) as ToolMode[]).map((m) => (
+              <SelectItem key={m} value={m}>
+                {TOOL_MODE_LABEL[m]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <span className="text-hint text-muted-foreground">
           {props.toolMode === "minimal" && "Flat inline step lines."}
           {props.toolMode === "contained" && "Every tool in its own container."}
-          {props.toolMode === "mix" && "Prose inline, tools contained."}
+          {props.toolMode === "mix" && "Expandable tools contained, the rest inline."}
+          {props.toolMode === "combined" && "Each run of steps shares one container, one row per step."}
         </span>
+      </div>
+
+      {/* Step density */}
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Step density
+        </span>
+        <SegmentedControl
+          value={props.density}
+          onValueChange={(v) => setProps({ ...props, density: v as Density })}
+        >
+          <SegmentedItem value="flat">Flat</SegmentedItem>
+          <SegmentedItem value="focus">One at a time</SegmentedItem>
+        </SegmentedControl>
+        <span className="text-hint text-muted-foreground">
+          {props.density === "flat"
+            ? "Every step shows while a run streams, like Today."
+            : "Only the live step shows; finished steps roll up above it."}
+        </span>
+        <ToggleRow
+          id="indent-steps"
+          label="Indent expanded steps"
+          checked={props.indentSteps}
+          onChange={(v) => setProps({ ...props, indentSteps: v })}
+        />
       </div>
 
       {/* Toggles */}
@@ -1023,9 +1854,10 @@ function PlaygroundRail({
         </div>
         <ToggleRow
           id="show-completed-count"
-          label="# of completed steps"
+          label="# in roll-up header"
           checked={props.showCompletedCount}
           onChange={(v) => setProps({ ...props, showCompletedCount: v })}
+          disabled={props.density !== "focus"}
         />
         <ToggleRow
           id="group-repeated-tools"
@@ -1033,97 +1865,197 @@ function PlaygroundRail({
           checked={props.groupRepeatedTools}
           onChange={(v) => setProps({ ...props, groupRepeatedTools: v })}
         />
+        <ToggleRow
+          id="show-tool-timer"
+          label="Tool timers"
+          checked={props.showToolTimer}
+          onChange={(v) => setProps({ ...props, showToolTimer: v })}
+        />
+      </div>
+
+      {/* Proposed loader escalation */}
+      <div className="flex flex-col gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Thinking label (Proposed)
+        </span>
+        <SecondsRow
+          id="still-thinking-after"
+          label="“Still thinking” at"
+          value={props.stillThinkingAfter}
+          onChange={(v) => setProps({ ...props, stillThinkingAfter: v })}
+        />
+        <SecondsRow
+          id="taking-longer-after"
+          label="“Taking longer” at"
+          value={props.takingLongerAfter}
+          onChange={(v) => setProps({ ...props, takingLongerAfter: v })}
+        />
       </div>
     </aside>
   )
 }
 
+// ─── Transport ────────────────────────────────────────────────────────────────
+
+function Transport({ playback, total }: { playback: ReturnType<typeof usePlayback>; total: number }) {
+  return (
+    <div className="flex shrink-0 items-center gap-3">
+      <Button variant="default" size="sm" onClick={playback.restart} className="gap-1.5">
+        <RotateCcw className="h-4 w-4" />
+        Restart
+      </Button>
+      <Button size="sm" onClick={playback.toggle} className="w-[84px] gap-1.5">
+        {playback.playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        {playback.playing ? "Pause" : "Play"}
+      </Button>
+      <SegmentedControl
+        value={String(playback.speed)}
+        onValueChange={(v) => playback.setSpeed(Number(v))}
+      >
+        {SPEEDS.map((s) => (
+          <SegmentedItem key={s} value={String(s)}>
+            {s}×
+          </SegmentedItem>
+        ))}
+      </SegmentedControl>
+      <Slider
+        value={[playback.now]}
+        min={0}
+        max={total}
+        step={100}
+        onValueChange={([v]) => {
+          playback.setScrubbing(true)
+          playback.seek(v)
+        }}
+        onValueCommit={() => playback.setScrubbing(false)}
+        aria-label="Timeline"
+        className="min-w-0 flex-1"
+      />
+      <span className="w-[92px] shrink-0 text-right text-hint tabular-nums text-muted-foreground">
+        {(playback.now / 1000).toFixed(1)}s / {Math.round(total / 1000)}s
+      </span>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function GenieThreadVariants() {
-  const [props, setProps] = useState<PlaygroundProps>(DEFAULT_PROPS)
-  const { state: reveal, rerun } = useReplay()
+// useSearchParams needs a Suspense boundary so static prerender can bail out to
+// the client instead of failing the build.
+export default function GenieThreadVariantsPage() {
+  return (
+    <Suspense>
+      <GenieThreadVariants />
+    </Suspense>
+  )
+}
 
-  // Which options are visible. Hidden ones collapse out; visible ones widen.
-  const [hidden, setHidden] = useState<Record<Density, boolean>>({
-    full: false,
-    focus: false,
+function GenieThreadVariants() {
+  // The setup is seeded from the URL on first render, so a shared link opens
+  // exactly as it was configured.
+  const searchParams = useSearchParams()
+  const [initial] = useState(() => decodeState(searchParams.toString()))
+  const [props, setProps] = useState<PlaygroundProps>(initial.props)
+  // Which options are hidden. Hidden ones collapse out; visible ones widen.
+  // A link that hides every option falls back to showing all of them.
+  const [hidden, setHidden] = useState<Record<Variant, boolean>>(() => {
+    const all = initial.hidden.length >= OPTIONS.length
+    return {
+      today: !all && initial.hidden.includes("today"),
+      proposed: !all && initial.hidden.includes("proposed"),
+    }
   })
-  const visible = OPTIONS.filter((o) => !hidden[o.density])
-  const hiddenOptions = OPTIONS.filter((o) => hidden[o.density])
-  const show = (d: Density) => setHidden((h) => ({ ...h, [d]: false }))
-  const hide = (d: Density) => setHidden((h) => ({ ...h, [d]: true }))
+
+  // Mirror the setup back into the URL. replaceState, so tweaking controls
+  // doesn't pile up history entries.
+  useEffect(() => {
+    const q = encodeState(
+      props,
+      OPTIONS.filter((o) => hidden[o.variant]).map((o) => o.variant),
+    )
+    window.history.replaceState(null, "", q ? `${window.location.pathname}?${q}` : window.location.pathname)
+  }, [props, hidden])
+
+  const timeline = useMemo(() => buildTimeline(props.showThoughts), [props.showThoughts])
+  const playback = usePlayback(timeline.total)
+  const tl = useMemo<TimelineState>(
+    () => ({ now: playback.now, atoms: timeline.atoms }),
+    [playback.now, timeline.atoms],
+  )
+
+  const visible = OPTIONS.filter((o) => !hidden[o.variant])
+  const hiddenOptions = OPTIONS.filter((o) => hidden[o.variant])
+  const show = (v: Variant) => setHidden((h) => ({ ...h, [v]: false }))
+  const hide = (v: Variant) => setHidden((h) => ({ ...h, [v]: true }))
   // Grid columns follow the visible count so cards fill the width.
   const gridCols = visible.length === 1 ? "lg:grid-cols-1" : "lg:grid-cols-2"
 
   return (
-    <RevealContext.Provider value={reveal}>
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-6">
-        <div className="flex items-center gap-2">
-          <Link
-            href="/"
-            prefetch={false}
-            className="flex items-center gap-1 text-hint text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Hub
-          </Link>
-          <span className="text-muted-foreground/40 select-none">|</span>
-          <DatabricksLogo height={16} />
-          <span className="text-muted-foreground/40 select-none">|</span>
-          <span className="text-sm text-muted-foreground">Genie thread — steps & progress</span>
-        </div>
-        <ThemeToggle />
-      </header>
+    <TimelineContext.Provider value={tl}>
+      <div className="flex h-screen flex-col overflow-hidden bg-background">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-6">
+          <div className="flex items-center gap-2">
+            <Link
+              href="/"
+              prefetch={false}
+              className="flex items-center gap-1 text-hint text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Hub
+            </Link>
+            <span className="text-muted-foreground/40 select-none">|</span>
+            <DatabricksLogo height={16} />
+            <span className="text-muted-foreground/40 select-none">|</span>
+            <span className="text-sm text-muted-foreground">Genie thread — reasoning & steps</span>
+          </div>
+          <ThemeToggle />
+        </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <PlaygroundRail props={props} setProps={setProps} />
+        <div className="flex flex-1 overflow-hidden">
+          <PlaygroundRail props={props} setProps={setProps} />
 
-        <main className="flex-1 overflow-hidden px-8 py-8">
-          <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6">
-            <div className="flex shrink-0 items-start justify-between gap-4">
-              <p className="text-sm text-muted-foreground">
-                Each card renders the same EDA thread at a different progress density. The Playground
-                on the left styles the tool &amp; step items across both.
-              </p>
-              <div className="flex shrink-0 items-center gap-2">
-                {/* Restore chips for any hidden options */}
-                {hiddenOptions.map((o) => (
-                  <Button
-                    key={o.density}
-                    variant="default"
-                    size="sm"
-                    onClick={() => show(o.density)}
-                    className="gap-1.5 text-muted-foreground"
-                  >
-                    <Eye className="h-4 w-4" />
-                    Show {o.label.replace("Option ", "")}
-                  </Button>
+          <main className="flex-1 overflow-hidden px-8 py-6">
+            <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5">
+              <div className="flex shrink-0 flex-col gap-3">
+                <div className="flex items-start justify-between gap-4">
+                  <p className="text-sm text-muted-foreground">
+                    The same EDA thread streaming at a realistic pace. Today is what ships now; Proposed is the
+                    proposed reasoning treatment. Tools, prose and step folds are identical.
+                  </p>
+                  {/* Restore chips for any hidden options */}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {hiddenOptions.map((o) => (
+                      <Button
+                        key={o.variant}
+                        variant="default"
+                        size="sm"
+                        onClick={() => show(o.variant)}
+                        className="gap-1.5 text-muted-foreground"
+                      >
+                        <Eye className="h-4 w-4" />
+                        Show {o.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <Transport playback={playback} total={timeline.total} />
+              </div>
+              <div className={cn("grid min-h-0 flex-1 grid-cols-1 gap-8", gridCols)}>
+                {visible.map((o) => (
+                  <OptionCard
+                    key={`${o.variant}-${playback.runId}`}
+                    option={o}
+                    props={props}
+                    following={playback.playing}
+                    onHide={() => hide(o.variant)}
+                    canHide={visible.length > 1}
+                  />
                 ))}
-                <Button size="sm" onClick={rerun} className="gap-1.5">
-                  <RotateCw className="h-4 w-4" />
-                  Rerun
-                </Button>
               </div>
             </div>
-            <div className={cn("grid min-h-0 flex-1 grid-cols-1 gap-8", gridCols)}>
-              {visible.map((o) => (
-                <OptionCard
-                  key={o.density}
-                  label={o.label}
-                  caption={o.caption}
-                  density={o.density}
-                  props={props}
-                  onHide={() => hide(o.density)}
-                  canHide={visible.length > 1}
-                />
-              ))}
-            </div>
-          </div>
-        </main>
+          </main>
+        </div>
       </div>
-    </div>
-    </RevealContext.Provider>
+    </TimelineContext.Provider>
   )
 }
