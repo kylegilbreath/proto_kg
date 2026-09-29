@@ -8,7 +8,7 @@
 //   • Left rail = Proposal Playground — props that apply to EVERY card: tool UI mode,
 //     step density (flat vs one at a time; Proposed only, Today is always flat),
 //     thoughts / status visibility,
-//     repeated-tool grouping, and the Proposed loader's escalation thresholds.
+//     repeated-tool grouping, and when the Proposed loader says "Still thinking".
 //     Rail state is mirrored into URL params so a setup can be shared as a link;
 //     the Summary block at the top of the rail describes it in words.
 //   • Right = Option cards, differing only in how REASONING renders:
@@ -16,8 +16,8 @@
 //                     streams inline under "Thinking…", then auto-collapses to
 //                     "Thoughts: <first line>".
 //       - Proposed    thoughts collapsed by default; while thinking, a loader
-//                     whose label escalates (Thinking → Still thinking → Taking
-//                     longer) plus a live timer; "Thought" when done.
+//                     whose label escalates (Thinking → Still thinking) plus
+//                     a live timer; "Thought" when done.
 //     Runs of steps fold into "N steps" once prose follows them (FoldedToolCalls).
 //
 // Linked from the Prototype Hub home page (PROTOTYPES array in src/app/page.tsx).
@@ -93,12 +93,14 @@ type PlaygroundProps = {
   groupRepeatedTools: boolean
   // Live elapsed-seconds readout left of a running tool's spinner.
   showToolTimer: boolean
+  // Running tools show an indeterminate striped (barber-pole) bar instead of
+  // the spinner.
+  toolProgressBar: boolean
   // Expanded step lists ("N steps", "×N") sit in an indented left-rule
   // container. Proposed only; Today is always flush.
   indentSteps: boolean
-  // Proposed loader escalation thresholds, in seconds of thinking.
+  // Seconds of thinking before the Proposed loader switches to "Still thinking".
   stillThinkingAfter: number
-  takingLongerAfter: number
 }
 
 const DEFAULT_PROPS: PlaygroundProps = {
@@ -111,9 +113,9 @@ const DEFAULT_PROPS: PlaygroundProps = {
   showCompletedCount: true,
   groupRepeatedTools: true,
   showToolTimer: true,
+  toolProgressBar: false,
   indentSteps: true,
-  stillThinkingAfter: 5,
-  takingLongerAfter: 15,
+  stillThinkingAfter: 10,
 }
 
 const TOOL_MODE_LABEL: Record<ToolMode, string> = {
@@ -156,9 +158,9 @@ const PARAM_KEYS: Record<keyof PlaygroundProps, string> = {
   showCompletedCount: "count",
   groupRepeatedTools: "group",
   showToolTimer: "timer",
+  toolProgressBar: "bar",
   indentSteps: "indent",
   stillThinkingAfter: "still",
-  takingLongerAfter: "longer",
 }
 
 const PROP_KEYS = Object.keys(PARAM_KEYS) as (keyof PlaygroundProps)[]
@@ -235,12 +237,16 @@ function summarize(p: PlaygroundProps): SummaryRow[] {
       changed: p.groupRepeatedTools !== d.groupRepeatedTools,
     },
     { label: "Tool timer", value: p.showToolTimer ? "On" : "Off", changed: p.showToolTimer !== d.showToolTimer },
+    {
+      label: "Tool progress",
+      value: p.toolProgressBar ? "Striped bar" : "Spinner",
+      changed: p.toolProgressBar !== d.toolProgressBar,
+    },
     { label: "Step indent", value: p.indentSteps ? "Indented" : "Flush", changed: p.indentSteps !== d.indentSteps },
     {
       label: "Proposed loader",
-      value: `${p.stillThinkingAfter}s / ${p.takingLongerAfter}s`,
-      changed:
-        p.stillThinkingAfter !== d.stillThinkingAfter || p.takingLongerAfter !== d.takingLongerAfter,
+      value: `Still thinking at ${p.stillThinkingAfter}s`,
+      changed: p.stillThinkingAfter !== d.stillThinkingAfter,
     },
   )
   return rows
@@ -250,8 +256,8 @@ function summarize(p: PlaygroundProps): SummaryRow[] {
 // A close replica of the NYC-taxi EDA thread: a run header, interleaved Thoughts,
 // tool actions with real statuses, step runs, prose summaries, and asset chips.
 // `ms` is how long each atom takes on the replay clock (thoughts and prose
-// stream over it; tools spin for it). A few thoughts run past 15s on purpose so
-// the Proposed loader escalates all the way.
+// stream over it; tools spin for it). A few thoughts run past 10s on purpose so
+// the Proposed loader reaches "Still thinking".
 
 type ToolStatus = "success" | "running" | "pendingOutput" | "failure" | "skipped"
 
@@ -738,7 +744,14 @@ function ToolTrailing({
       {showTimer && (
         <span className="text-hint tabular-nums text-muted-foreground">{formatElapsed(elapsed)}</span>
       )}
-      {showGlyph && <StatusGlyph status={status} size={16} />}
+      {showGlyph &&
+        (status === "running" && props.toolProgressBar ? (
+          <span role="status" aria-label="Running" className="inline-flex">
+            <StripedProgress className="h-1.5 w-12" />
+          </span>
+        ) : (
+          <StatusGlyph status={status} size={16} />
+        ))}
       {after}
     </span>
   )
@@ -785,10 +798,15 @@ function highlightSql(sql: string): React.ReactNode[] {
   })
 }
 
-// Indeterminate striped bar shown next to "Tasks" while a query runs.
-function StripedProgress() {
+// Indeterminate striped bar: next to "Tasks" while a query runs, and in a
+// running tool row when props.toolProgressBar is on.
+// Sized by `className` (defaults to the wide "Tasks" bar in the SQL detail).
+function StripedProgress({ className = "h-2 w-[200px]" }: { className?: string }) {
   return (
-    <span className="tool-progress inline-block h-2 w-[200px] min-w-0 shrink rounded-full" aria-hidden="true">
+    <span
+      className={cn("tool-progress inline-block min-w-0 shrink rounded-full", className)}
+      aria-hidden="true"
+    >
       <style>{`
         @keyframes tool-progress-slide { to { background-position: 16px 0; } }
         .tool-progress {
@@ -974,7 +992,11 @@ function ToolAction({
   const chevron = (
     <ChevronRightIcon
       size={14}
-      className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+      className={cn(
+        "shrink-0 text-muted-foreground transition-[transform,opacity]",
+        open && "rotate-90",
+        !contained && !open && HOVER_REVEAL,
+      )}
     />
   )
   const body = (flush: boolean) =>
@@ -1008,7 +1030,7 @@ function ToolAction({
           variant="ghost"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className={cn(ROW_BUTTON, "w-full gap-2 py-0")}
+          className={cn(ROW_BUTTON, "group w-full gap-2 py-0")}
         >
           <span className="min-w-0 truncate">{title}</span>
           {asset && <AssetChip asset={asset} />}
@@ -1077,6 +1099,11 @@ function ThinkingDots() {
   )
 }
 
+// A collapsed row's chevron stays hidden until the row (a `group`) is hovered or
+// keyboard-focused. Opacity only, so revealing it never shifts the layout. Once
+// expanded the chevron stays visible as the collapse affordance.
+const HOVER_REVEAL = "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+
 // Shared class for the grey, borderless clickable header rows in the thread.
 const ROW_BUTTON =
   "h-auto justify-start gap-1.5 px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground has-[>svg]:px-0"
@@ -1087,9 +1114,12 @@ function nestedStepsClass(props: PlaygroundProps, variant: Variant): string {
   return variant === "proposed" && props.indentSteps ? "ml-2 border-l border-border pl-3" : ""
 }
 
+// The Proposed thinking timer stays hidden until the thought has run this long,
+// so quick thoughts never flash a "0s" / "1s" readout.
+const THINKING_TIMER_AFTER_S = 2
+
 // Proposed loader label, escalating with how long the thought has run.
 function thinkingLabel(sec: number, props: PlaygroundProps): string {
-  if (sec >= props.takingLongerAfter) return "Taking longer"
   if (sec >= props.stillThinkingAfter) return "Still thinking"
   return "Thinking"
 }
@@ -1144,7 +1174,10 @@ function ThoughtBlock({
   const sec = elapsedSec(tl, revealKey)
   const firstLine = text.split("\n")[0].trim()
   const chevron = (
-    <ChevronRightIcon size={14} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+    <ChevronRightIcon
+      size={14}
+      className={cn("shrink-0 transition-[transform,opacity]", open ? "rotate-90" : HOVER_REVEAL)}
+    />
   )
 
   let header: React.ReactNode
@@ -1166,7 +1199,7 @@ function ThoughtBlock({
           {thinkingLabel(sec, props)}
           <ThinkingDots />
         </span>
-        <span className="tabular-nums">{formatElapsed(sec)}</span>
+        {sec >= THINKING_TIMER_AFTER_S && <span className="tabular-nums">{formatElapsed(sec)}</span>}
         {chevron}
       </>
     )
@@ -1197,7 +1230,7 @@ function ThoughtBlock({
         variant="ghost"
         onClick={() => setOverride(!open)}
         aria-expanded={open}
-        className={cn(ROW_BUTTON, "w-full min-w-0")}
+        className={cn(ROW_BUTTON, "group w-full min-w-0")}
       >
         {header}
       </Button>
@@ -1260,7 +1293,13 @@ function ToolRunGroup({
     <>
       <span className="min-w-0 truncate">{title}</span>
       <span className="shrink-0 text-muted-foreground">×{indices.length}</span>
-      <ChevronRightIcon size={14} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+      <ChevronRightIcon
+        size={14}
+        className={cn(
+          "shrink-0 transition-[transform,opacity]",
+          open ? "rotate-90" : props.toolMode !== "combined" && HOVER_REVEAL,
+        )}
+      />
       <ToolTrailing status={lastStatus} elapsed={lastElapsed} showGlyph={showGlyph} props={props} />
     </>
   )
@@ -1299,7 +1338,7 @@ function ToolRunGroup({
       <Button
         variant="ghost"
         onClick={() => setOpen((o) => !o)}
-        className={cn(ROW_BUTTON, "w-full gap-2 py-0")}
+        className={cn(ROW_BUTTON, "group w-full gap-2 py-0")}
       >
         {header}
       </Button>
@@ -1929,9 +1968,15 @@ function PlaygroundRail({
           checked={props.showToolTimer}
           onChange={(v) => setProps({ ...props, showToolTimer: v })}
         />
+        <ToggleRow
+          id="tool-progress-bar"
+          label="Striped progress bar"
+          checked={props.toolProgressBar}
+          onChange={(v) => setProps({ ...props, toolProgressBar: v })}
+        />
       </div>
 
-      {/* Proposed loader escalation */}
+      {/* Proposed loader: when the label switches to "Still thinking" */}
       <div className="flex flex-col gap-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Thinking label (Proposed)
@@ -1941,12 +1986,6 @@ function PlaygroundRail({
           label="“Still thinking” at"
           value={props.stillThinkingAfter}
           onChange={(v) => setProps({ ...props, stillThinkingAfter: v })}
-        />
-        <SecondsRow
-          id="taking-longer-after"
-          label="“Taking longer” at"
-          value={props.takingLongerAfter}
-          onChange={(v) => setProps({ ...props, takingLongerAfter: v })}
         />
       </div>
     </aside>
