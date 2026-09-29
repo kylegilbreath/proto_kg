@@ -305,6 +305,24 @@ FROM
   samples.nyctaxi.trips
 LIMIT 10`
 
+// Execute code retry pair: the first misses the catalog, the second qualifies it
+// and date-scopes the read.
+const EXEC_UNQUALIFIED_SQL = `SELECT
+  *
+FROM
+  nyctaxi.trips
+WHERE
+  tpep_pickup_datetime >= '2016-02-01'
+LIMIT 10`
+
+const EXEC_QUALIFIED_SQL = `SELECT
+  *
+FROM
+  samples.nyctaxi.trips
+WHERE
+  tpep_pickup_datetime >= '2016-02-01'
+LIMIT 10`
+
 const SAMPLE_RESULT: QueryResult = {
   columns: [
     { name: "tpep_pickup_datetime", type: "timestamp" },
@@ -403,6 +421,23 @@ const THREAD: ThreadItem[] = [
     children: [
       { kind: "tool", title: "Edited", asset: NB, status: "success", ms: 2500 },
       { kind: "tool", title: "Edited", asset: NB, status: "success", ms: 2500 },
+      {
+        kind: "tool",
+        title: "Execute code",
+        status: "failure",
+        ms: 5000,
+        detail: {
+          sql: EXEC_UNQUALIFIED_SQL,
+          error: "[TABLE_OR_VIEW_NOT_FOUND] The table or view `nyctaxi`.`trips` cannot be found.",
+        },
+      },
+      {
+        kind: "tool",
+        title: "Execute code",
+        status: "success",
+        ms: 9000,
+        detail: { sql: EXEC_QUALIFIED_SQL, result: SAMPLE_RESULT },
+      },
     ],
   },
   {
@@ -727,15 +762,16 @@ function clockLabel(offsetMs: number): string {
 
 type ToolTiming = { clock: string; seconds: number }
 
-const SQL_KEYWORDS = new Set(["SELECT", "FROM", "WHERE", "ORDER", "BY", "ASC", "DESC", "LIMIT"])
+const SQL_KEYWORDS = new Set(["SELECT", "FROM", "WHERE", "AND", "ORDER", "BY", "ASC", "DESC", "LIMIT"])
 
-// Minimal SQL highlighter: keywords, numbers, and catalog/schema qualifiers
-// (any identifier followed by a dot).
+// Minimal SQL highlighter: keywords, string literals, numbers, and
+// catalog/schema qualifiers (any identifier followed by a dot).
 function highlightSql(sql: string): React.ReactNode[] {
-  const tokens = sql.match(/\s+|\w+|[^\w\s]/g) ?? []
+  const tokens = sql.match(/'[^']*'|\s+|\w+|[^\w\s]/g) ?? []
   return tokens.map((tok, i) => {
     let cls = ""
-    if (/^[A-Za-z]+$/.test(tok) && SQL_KEYWORDS.has(tok.toUpperCase())) cls = "text-primary"
+    if (tok.startsWith("'")) cls = "text-yellow-700"
+    else if (/^[A-Za-z]+$/.test(tok) && SQL_KEYWORDS.has(tok.toUpperCase())) cls = "text-primary"
     else if (/^\d+$/.test(tok)) cls = "text-green-600"
     else if (/^\w+$/.test(tok) && tokens[i + 1] === ".") cls = "text-brown-500"
     else if (tok === "*" || tok === ".") cls = "text-muted-foreground"
@@ -1130,7 +1166,7 @@ function ThoughtBlock({
           {thinkingLabel(sec, props)}
           <ThinkingDots />
         </span>
-        <span className="tabular-nums">· {formatElapsed(sec)}</span>
+        <span className="tabular-nums">{formatElapsed(sec)}</span>
         {chevron}
       </>
     )
