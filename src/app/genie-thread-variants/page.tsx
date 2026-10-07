@@ -51,6 +51,8 @@ import {
   HashIcon,
   CopyIcon,
   DownloadIcon,
+  BarChartIcon,
+  CheckCircleIcon,
 } from "@/components/icons"
 import { DbIcon } from "@/components/ui/db-icon"
 import { Button } from "@/components/ui/button"
@@ -60,6 +62,7 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Slider } from "@/components/ui/slider"
+import { Separator } from "@/components/ui/separator"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { SegmentedControl, SegmentedItem } from "@/components/ui/segmented-control"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
@@ -96,6 +99,9 @@ type PlaygroundProps = {
   // Running tools show an indeterminate striped (barber-pole) bar instead of
   // the spinner.
   toolProgressBar: boolean
+  // Running query tools show a mini task-progress bar in the collapsed row
+  // (in place of the spinner / striped bar).
+  queryRowProgress: boolean
   // Expanded step lists ("N steps", "×N") sit in an indented left-rule
   // container. Proposed only; Today is always flush.
   indentSteps: boolean
@@ -114,6 +120,7 @@ const DEFAULT_PROPS: PlaygroundProps = {
   groupRepeatedTools: true,
   showToolTimer: true,
   toolProgressBar: false,
+  queryRowProgress: true,
   indentSteps: true,
   stillThinkingAfter: 10,
 }
@@ -159,6 +166,7 @@ const PARAM_KEYS: Record<keyof PlaygroundProps, string> = {
   groupRepeatedTools: "group",
   showToolTimer: "timer",
   toolProgressBar: "bar",
+  queryRowProgress: "qprog",
   indentSteps: "indent",
   stillThinkingAfter: "still",
 }
@@ -242,6 +250,11 @@ function summarize(p: PlaygroundProps): SummaryRow[] {
       value: p.toolProgressBar ? "Striped bar" : "Spinner",
       changed: p.toolProgressBar !== d.toolProgressBar,
     },
+    {
+      label: "Query progress",
+      value: p.queryRowProgress ? "Row + detail" : "Detail only",
+      changed: p.queryRowProgress !== d.queryRowProgress,
+    },
     { label: "Step indent", value: p.indentSteps ? "Indented" : "Flush", changed: p.indentSteps !== d.indentSteps },
     {
       label: "Proposed loader",
@@ -272,7 +285,16 @@ type AssetRef = { label: string; icon: IconComponent }
 // or an error line on failure. Tools without a detail have nothing to expand.
 type ColumnType = "timestamp" | "double" | "int"
 type QueryResult = { columns: { name: string; type: ColumnType }[]; rows: string[][] }
-type ToolDetail = { sql: string; result?: QueryResult; error?: string }
+// `tasks` = Spark tasks the statement fans out to (drives the performance bar;
+// omit for statements that fail before any task runs). `failAt` = fraction of
+// tasks done when a failed statement stopped.
+type ToolDetail = {
+  sql: string
+  result?: QueryResult
+  error?: string
+  tasks?: number
+  failAt?: number
+}
 
 // A step run's children are only thoughts and tools.
 type StepChild =
@@ -377,7 +399,12 @@ const THREAD: ThreadItem[] = [
         title: "Sample NYC taxi trips data",
         status: "failure",
         ms: 6000,
-        detail: { sql: SAMPLE_SORTED_SQL, error: "Query timed out. No rows returned." },
+        detail: {
+          sql: SAMPLE_SORTED_SQL,
+          error: "Query timed out. No rows returned.",
+          tasks: 3110,
+          failAt: 0.41,
+        },
       },
       {
         kind: "thoughts",
@@ -389,7 +416,7 @@ const THREAD: ThreadItem[] = [
         title: "Sample NYC taxi trips without sort",
         status: "success",
         ms: 17000,
-        detail: { sql: SAMPLE_SQL, result: SAMPLE_RESULT },
+        detail: { sql: SAMPLE_SQL, result: SAMPLE_RESULT, tasks: 12 },
       },
       {
         kind: "thoughts",
@@ -442,7 +469,7 @@ const THREAD: ThreadItem[] = [
         title: "Execute code",
         status: "success",
         ms: 9000,
-        detail: { sql: EXEC_QUALIFIED_SQL, result: SAMPLE_RESULT },
+        detail: { sql: EXEC_QUALIFIED_SQL, result: SAMPLE_RESULT, tasks: 64 },
       },
     ],
   },
@@ -730,14 +757,22 @@ function ToolTrailing({
   showGlyph,
   props,
   after,
+  progress,
 }: {
   status: ToolStatus
   elapsed?: number
   showGlyph: boolean
   props: PlaygroundProps
   after?: React.ReactNode
+  // Task progress of a running query; shown as a mini bar when enabled.
+  progress?: QueryProgress
 }) {
-  const showTimer = props.showToolTimer && status === "running" && elapsed !== undefined
+  // Hold the timer back for the first couple seconds, like the Thinking timer.
+  const showTimer =
+    props.showToolTimer &&
+    status === "running" &&
+    elapsed !== undefined &&
+    elapsed >= THINKING_TIMER_AFTER_S
   if (!showGlyph && !showTimer && !after) return null
   return (
     <span className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -745,7 +780,9 @@ function ToolTrailing({
         <span className="text-hint tabular-nums text-muted-foreground">{formatElapsed(elapsed)}</span>
       )}
       {showGlyph &&
-        (status === "running" && props.toolProgressBar ? (
+        (status === "running" && progress && props.queryRowProgress ? (
+          <TaskBar progress={progress} className="h-1.5 w-12" />
+        ) : status === "running" && props.toolProgressBar ? (
           <span role="status" aria-label="Running" className="inline-flex">
             <StripedProgress className="h-1.5 w-12" />
           </span>
@@ -798,8 +835,8 @@ function highlightSql(sql: string): React.ReactNode[] {
   })
 }
 
-// Indeterminate striped bar: next to "Tasks" while a query runs, and in a
-// running tool row when props.toolProgressBar is on.
+// Indeterminate striped bar for a running tool row when props.toolProgressBar
+// is on.
 // Sized by `className` (defaults to the wide "Tasks" bar in the SQL detail).
 function StripedProgress({ className = "h-2 w-[200px]" }: { className?: string }) {
   return (
@@ -879,20 +916,126 @@ function ResultGrid({ result }: { result: QueryResult }) {
   )
 }
 
+// ─── Query performance ────────────────────────────────────────────────────────
+// Task progress for a query tool, mirroring the notebook cell's performance
+// footer ("Tasks ▰▰▱ 1,812/3,110 (109 running)"). Driven by how far the tool is
+// through its run on the replay clock (`fraction`, 0–1).
+
+type QueryProgress = { done: number; running: number; total: number }
+
+function queryProgress(
+  detail: ToolDetail,
+  status: ToolStatus,
+  fraction: number,
+): QueryProgress | undefined {
+  const total = detail.tasks
+  if (!total) return undefined
+  if (status === "success") return { done: total, running: 0, total }
+  // A failed statement stops partway; a running one heads for its stop point.
+  const reach = detail.failAt ?? 1
+  const f = status === "failure" ? reach : Math.min(1, fraction) * reach
+  const done = Math.min(total, Math.round(total * f))
+  // Parallelism ramps up over the first 10% of the run.
+  const cap = Math.min(109, Math.ceil(total * 0.25))
+  const running =
+    status === "running" ? Math.min(total - done, Math.round(cap * Math.min(1, fraction / 0.1))) : 0
+  return { done, running, total }
+}
+
+// How far an atom is through its own duration on the clock (0–1).
+function atomFraction(tl: TimelineState, key: string): number {
+  const a = tl.atoms[key]
+  if (!a || a.end <= a.start) return 1
+  return Math.min(1, Math.max(0, (tl.now - a.start) / (a.end - a.start)))
+}
+
+// Determinate task bar: done (success green), running (primary blue), pending
+// (track). Sized by `className`.
+function TaskBar({ progress, className }: { progress: QueryProgress; className?: string }) {
+  const pct = (n: number) => `${(n / progress.total) * 100}%`
+  return (
+    <span
+      role="progressbar"
+      aria-label="Tasks"
+      aria-valuemin={0}
+      aria-valuemax={progress.total}
+      aria-valuenow={progress.done}
+      className={cn("inline-flex shrink-0 overflow-hidden rounded-full bg-border", className)}
+    >
+      <span className="h-full bg-[var(--success)] transition-[width]" style={{ width: pct(progress.done) }} />
+      <span className="h-full bg-primary transition-[width]" style={{ width: pct(progress.running) }} />
+    </span>
+  )
+}
+
+// Footer under the SQL: "› See performance · Statement ✓0/1 ⟳1 | Tasks ▰▰▱ n/N".
+// "See performance" is a non-functional prototype affordance.
+function PerformanceFooter({ status, progress }: { status: ToolStatus; progress?: QueryProgress }) {
+  const fmt = (n: number) => n.toLocaleString("en-US")
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+      <Button variant="link" size="xs" className="h-auto gap-1 px-0 font-normal has-[>svg]:px-0">
+        <ChevronRightIcon size={14} />
+        <DbIcon icon={BarChartIcon} size={16} />
+        See performance
+      </Button>
+      <span className="inline-flex items-center gap-1.5">
+        Statement
+        <span className="inline-flex items-center gap-0.5 tabular-nums">
+          <DbIcon icon={CheckCircleIcon} size={14} className="text-[var(--success)]" ariaLabel="Succeeded" />
+          {status === "success" ? 1 : 0}/1
+        </span>
+        {status === "running" && (
+          <span className="inline-flex items-center gap-1 tabular-nums">
+            <StatusGlyph status="running" size={12} />1
+          </span>
+        )}
+        {status === "failure" && (
+          <span className="inline-flex items-center gap-0.5 tabular-nums">
+            <DbIcon icon={DangerIcon} size={14} className="text-muted-foreground" ariaLabel="Failed" />1
+          </span>
+        )}
+      </span>
+      {progress && (
+        <>
+          {/* Needs the orientation variant to beat Separator's own vertical h-full;
+              a muted tint so it reads on the grey block. */}
+          <Separator
+            orientation="vertical"
+            className="bg-muted-foreground/40 data-[orientation=vertical]:h-4"
+          />
+          <span className="inline-flex min-w-[200px] flex-1 items-center gap-2">
+            Tasks
+            <TaskBar progress={progress} className="h-2 min-w-12 max-w-[200px] flex-1" />
+            <span className="shrink-0 whitespace-nowrap tabular-nums">
+              {fmt(progress.done)}/{fmt(progress.total)}
+              {progress.running > 0 && ` (${fmt(progress.running)} running)`}
+            </span>
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
 // `flush` = rendered inside a contained tool card: fills the card edge to edge
 // (no radius, no side borders, just a divider under the card header).
 function ToolDetailBlock({
   detail,
   status,
   timing,
+  fraction = 1,
   flush = false,
 }: {
   detail: ToolDetail
   status: ToolStatus
   timing?: ToolTiming
+  // How far through its run the tool is (drives task progress).
+  fraction?: number
   flush?: boolean
 }) {
   const running = status === "running"
+  const progress = queryProgress(detail, status, fraction)
   const copy = () => {
     navigator.clipboard?.writeText(detail.sql).catch(() => {})
   }
@@ -906,11 +1049,7 @@ function ToolDetailBlock({
       <div className="flex flex-col gap-1 px-3 py-2.5">
         <div className="flex min-h-6 items-center gap-2 text-sm text-muted-foreground">
           {running ? (
-            <>
-              <span>Running…</span>
-              <span>Tasks</span>
-              <StripedProgress />
-            </>
+            <span>Running…</span>
           ) : (
             <>
               <StatusGlyph status={status} size={16} />
@@ -935,6 +1074,7 @@ function ToolDetailBlock({
           {/* Block code: drop the global inline-code chip (bg, padding, radius). */}
           <code className="rounded-none bg-transparent p-0 font-normal">{highlightSql(detail.sql)}</code>
         </pre>
+        <PerformanceFooter status={status} progress={progress} />
       </div>
       {!running && status === "success" && detail.result && <ResultGrid result={detail.result} />}
       {!running && status === "failure" && detail.error && (
@@ -968,6 +1108,7 @@ function ToolAction({
   elapsed,
   detail,
   timing,
+  fraction = 1,
   stacked = false,
   props,
 }: {
@@ -979,6 +1120,8 @@ function ToolAction({
   // Expandable body. Only tools with a detail get a chevron and a click target.
   detail?: ToolDetail
   timing?: ToolTiming
+  // How far through its run the tool is (0–1); drives query task progress.
+  fraction?: number
   // Row inside a stacked group card: the group owns the border and dividers.
   stacked?: boolean
   props: PlaygroundProps
@@ -999,9 +1142,12 @@ function ToolAction({
       )}
     />
   )
+  const progress = detail && running ? queryProgress(detail, status, fraction) : undefined
   const body = (flush: boolean) =>
     open &&
-    detail && <ToolDetailBlock detail={detail} status={status} timing={timing} flush={flush} />
+    detail && (
+      <ToolDetailBlock detail={detail} status={status} timing={timing} fraction={fraction} flush={flush} />
+    )
 
   if (!contained) {
     // Minimal: flat grey inline line; trailing timer / glyph, then the chevron
@@ -1012,6 +1158,7 @@ function ToolAction({
         elapsed={elapsed}
         showGlyph={showGlyph}
         props={props}
+        progress={progress}
         after={expandable && !running ? chevron : undefined}
       />
     )
@@ -1043,12 +1190,22 @@ function ToolAction({
 
   // Contained: bordered "Tool action" card — leading chevron (expandable tools
   // only), title, trailing status. The detail renders inside the same card.
+  // Combined puts the chevron far right, after the status, so every title in
+  // the run's card starts at the same left edge.
+  const chevronRight = props.toolMode === "combined"
   const header = (
     <>
-      {expandable && chevron}
+      {expandable && !chevronRight && chevron}
       <span className="min-w-0 truncate text-foreground">{title}</span>
       {asset && <AssetChip asset={asset} />}
-      <ToolTrailing status={status} elapsed={elapsed} showGlyph={showGlyph} props={props} />
+      <ToolTrailing
+        status={status}
+        elapsed={elapsed}
+        showGlyph={showGlyph}
+        props={props}
+        progress={progress}
+        after={expandable && chevronRight ? chevron : undefined}
+      />
     </>
   )
   return (
@@ -1282,6 +1439,10 @@ function ToolRunGroup({
   const showGlyph = glyphVisible(lastStatus, props)
   const lastElapsed =
     lastStatus === "running" ? elapsedSec(tl, childKey(parent, lastIdx)) : undefined
+  const lastProgress =
+    lastStatus === "running" && last.kind === "tool" && last.detail
+      ? queryProgress(last.detail, "running", atomFraction(tl, childKey(parent, lastIdx)))
+      : undefined
   // When every call renders as a card, stack them into one card with dividers
   // so the run reads as a single tool with line items.
   const stacked = indices.every((c) => {
@@ -1289,24 +1450,36 @@ function ToolRunGroup({
     return step.kind === "tool" && isContained(props, step.detail !== undefined)
   })
 
+  const combined = props.toolMode === "combined"
+  const groupChevron = (
+    <ChevronRightIcon
+      size={14}
+      className={cn(
+        "shrink-0 transition-[transform,opacity]",
+        open ? "rotate-90" : !combined && HOVER_REVEAL,
+      )}
+    />
+  )
+  // Combined: chevron far right after the status, matching tool rows in the card.
   const header = (
     <>
       <span className="min-w-0 truncate">{title}</span>
       <span className="shrink-0 text-muted-foreground">×{indices.length}</span>
-      <ChevronRightIcon
-        size={14}
-        className={cn(
-          "shrink-0 transition-[transform,opacity]",
-          open ? "rotate-90" : props.toolMode !== "combined" && HOVER_REVEAL,
-        )}
+      {!combined && groupChevron}
+      <ToolTrailing
+        status={lastStatus}
+        elapsed={lastElapsed}
+        showGlyph={showGlyph}
+        props={props}
+        progress={lastProgress}
+        after={combined ? groupChevron : undefined}
       />
-      <ToolTrailing status={lastStatus} elapsed={lastElapsed} showGlyph={showGlyph} props={props} />
     </>
   )
 
   // Combined: the group is a row in the run's card; expanding adds the calls as
   // indented rows directly below it, in the same card with the same dividers.
-  if (props.toolMode === "combined") {
+  if (combined) {
     return (
       <div className="flex flex-col divide-y divide-border">
         <Button
@@ -1588,6 +1761,7 @@ function ThreadItemView({
           status={settled ? item.status : "running"}
           elapsed={settled ? undefined : elapsedSec(tl, revealKey)}
           detail={item.detail}
+          fraction={atomFraction(tl, revealKey)}
           stacked={stacked}
           timing={
             atom
@@ -1973,6 +2147,12 @@ function PlaygroundRail({
           label="Striped progress bar"
           checked={props.toolProgressBar}
           onChange={(v) => setProps({ ...props, toolProgressBar: v })}
+        />
+        <ToggleRow
+          id="query-row-progress"
+          label="Query progress in row"
+          checked={props.queryRowProgress}
+          onChange={(v) => setProps({ ...props, queryRowProgress: v })}
         />
       </div>
 
